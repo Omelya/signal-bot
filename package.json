@@ -1,25 +1,40 @@
 {
   "name": "universal-signal-bot",
   "version": "2.0.0",
-  "description": "Universal Crypto Signal Bot with Multi-Pair and Multi-Timeframe Support",
-  "main": "index.js",
+  "description": "Universal Crypto Signal Bot with TypeScript, Clean Architecture and Multi-Exchange Support",
+  "main": "dist/main.js",
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "scripts": {
-    "start": "node index.js",
-    "dev": "nodemon index.js",
-    "test": "node test.js",
-    "setup": "node setup.js",
-    "single": "TRADING_MODE=single TRADING_PAIR=SOL/USDT TIMEFRAME=15m node index.js",
-    "multi": "TRADING_MODE=multi TIMEFRAME=15m node index.js",
-    "auto": "TRADING_MODE=auto MAX_AUTO_PAIRS=3 TIMEFRAME=15m node index.js",
-    "scalping": "TRADING_MODE=single TRADING_PAIR=SOL/USDT TIMEFRAME=5m node index.js",
-    "swing": "TRADING_MODE=single TRADING_PAIR=BTC/USDT TIMEFRAME=1h node index.js",
-    "btc": "TRADING_MODE=single TRADING_PAIR=BTC/USDT TIMEFRAME=15m node index.js",
-    "eth": "TRADING_MODE=single TRADING_PAIR=ETH/USDT TIMEFRAME=15m node index.js",
-    "sol": "TRADING_MODE=single TRADING_PAIR=SOL/USDT TIMEFRAME=15m node index.js",
-    "validate": "node validate-config.js",
-    "build": "pkg index.js --out-path dist/",
-    "install-deps": "npm install && echo '✅ Залежності встановлено!'",
-    "quick-setup": "cp .env.example .env && echo '📝 Файл .env створено! Налаштуйте токени.'"
+    "build": "tsc",
+    "build:watch": "tsc --watch",
+    "start": "node dist/main.js",
+    "dev": "ts-node-dev --respawn --transpile-only src/main.ts",
+    "start:prod": "NODE_ENV=production node dist/main.js",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "test:e2e": "jest --config jest.e2e.config.js",
+    "lint": "eslint src/**/*.ts",
+    "lint:fix": "eslint src/**/*.ts --fix",
+    "format": "prettier --write src/**/*.ts",
+    "format:check": "prettier --check src/**/*.ts",
+    "typecheck": "tsc --noEmit",
+    "clean": "rimraf dist",
+    "prebuild": "npm run clean",
+    "prepare": "husky install",
+    "docs:generate": "typedoc src --out docs",
+    "validate-config": "ts-node src/scripts/validateConfig.ts",
+    "setup": "ts-node src/scripts/setup.ts",
+    "single": "cross-env TRADING_MODE=single TRADING_PAIR=SOL/USDT TIMEFRAME=15m npm run dev",
+    "multi": "cross-env TRADING_MODE=multi TIMEFRAME=15m npm run dev",
+    "auto": "cross-env TRADING_MODE=auto MAX_AUTO_PAIRS=5 TIMEFRAME=15m npm run dev",
+    "scalping": "cross-env TRADING_MODE=single TRADING_PAIR=SOL/USDT TIMEFRAME=5m npm run dev",
+    "swing": "cross-env TRADING_MODE=single TRADING_PAIR=BTC/USDT TIMEFRAME=1h npm run dev",
+    "btc": "cross-env TRADING_MODE=single TRADING_PAIR=BTC/USDT TIMEFRAME=15m npm run dev",
+    "eth": "cross-env TRADING_MODE=single TRADING_PAIR=ETH/USDT TIMEFRAME=15m npm run dev",
+    "sol": "cross-env TRADING_MODE=single TRADING_PAIR=SOL/USDT TIMEFRAME=15m npm run dev"
   },
   "keywords": [
     "crypto",
@@ -30,34 +45,96 @@
     "solana",
     "technical-analysis",
     "telegram-bot",
-    "multi-pair",
-    "universal"
+    "multi-exchange",
+    "typescript",
+    "clean-architecture",
+    "bybit",
+    "binance",
+    "okx"
   ],
-  "author": "Your Name",
+  "author": "Your Name <your.email@example.com>",
   "license": "MIT",
   "dependencies": {
-    "ccxt": "^4.1.78",
-    "axios": "^1.6.2",
+    "axios": "^1.6.7",
+    "ccxt": "^4.2.0",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.14.1",
+    "cli-table3": "^0.6.5",
+    "compression": "^1.7.4",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.1",
+    "express": "^4.18.2",
+    "helmet": "^7.1.0",
+    "ioredis": "^5.3.2",
+    "node-cron": "^3.0.3",
     "node-telegram-bot-api": "^0.64.0",
-    "moment": "^2.29.4",
-    "colors": "^1.4.0",
-    "dotenv": "^16.3.1",
+    "rate-limiter-flexible": "^4.0.1",
+    "reflect-metadata": "^0.2.1",
     "winston": "^3.11.0"
   },
   "devDependencies": {
-    "nodemon": "^3.0.2",
-    "pkg": "^5.8.1",
-    "jest": "^29.7.0"
+    "@types/compression": "^1.7.5",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/ioredis": "^5.0.0",
+    "@types/jest": "^29.5.12",
+    "@types/node": "^20.11.19",
+    "@types/node-cron": "^3.0.11",
+    "@types/node-telegram-bot-api": "^0.64.0",
+    "@types/supertest": "^6.0.2",
+    "@typescript-eslint/eslint-plugin": "^7.0.2",
+    "@typescript-eslint/parser": "^7.0.2",
+    "cross-env": "^7.0.3",
+    "eslint": "^8.56.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-prettier": "^5.1.3",
+    "husky": "^9.0.11",
+    "jest": "^29.7.0",
+    "lint-staged": "^15.2.2",
+    "prettier": "^3.2.5",
+    "rimraf": "^5.0.5",
+    "supertest": "^6.3.4",
+    "ts-jest": "^29.1.2",
+    "ts-node": "^10.9.2",
+    "ts-node-dev": "^2.0.0",
+    "typedoc": "^0.25.8",
+    "typescript": "^5.3.3"
   },
-  "engines": {
-    "node": ">=16.0.0"
+  "lint-staged": {
+    "src/**/*.ts": [
+      "eslint --fix",
+      "prettier --write",
+      "jest --bail --findRelatedTests --passWithNoTests"
+    ]
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/yourusername/universal-signal-bot.git"
+    "url": "https://github.com/yourusername/universal-signal-bot-v2.git"
   },
   "bugs": {
-    "url": "https://github.com/yourusername/universal-signal-bot/issues"
+    "url": "https://github.com/yourusername/universal-signal-bot-v2/issues"
   },
-  "homepage": "https://github.com/yourusername/universal-signal-bot#readme"
+  "homepage": "https://github.com/yourusername/universal-signal-bot-v2#readme",
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "node",
+    "testMatch": [
+      "**/__tests__/**/*.ts",
+      "**/?(*.)+(spec|test).ts"
+    ],
+    "collectCoverageFrom": [
+      "src/**/*.ts",
+      "!src/**/*.d.ts",
+      "!src/**/*.interface.ts",
+      "!src/main.ts"
+    ],
+    "coverageReporters": [
+      "text",
+      "lcov",
+      "html"
+    ],
+    "setupFilesAfterEnv": [
+      "<rootDir>/src/__tests__/setup.ts"
+    ]
+  }
 }
