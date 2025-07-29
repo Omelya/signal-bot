@@ -1,3 +1,8 @@
 .idea
 .env
-/node_modules
+node_modules
+backtest-results
+data
+dist
+logs
+signals
