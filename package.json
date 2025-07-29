@@ -1,0 +1,63 @@
+{
+  "name": "universal-signal-bot",
+  "version": "2.0.0",
+  "description": "Universal Crypto Signal Bot with Multi-Pair and Multi-Timeframe Support",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "test": "node test.js",
+    "setup": "node setup.js",
+    "single": "TRADING_MODE=single TRADING_PAIR=SOL/USDT TIMEFRAME=15m node index.js",
+    "multi": "TRADING_MODE=multi TIMEFRAME=15m node index.js",
+    "auto": "TRADING_MODE=auto MAX_AUTO_PAIRS=3 TIMEFRAME=15m node index.js",
+    "scalping": "TRADING_MODE=single TRADING_PAIR=SOL/USDT TIMEFRAME=5m node index.js",
+    "swing": "TRADING_MODE=single TRADING_PAIR=BTC/USDT TIMEFRAME=1h node index.js",
+    "btc": "TRADING_MODE=single TRADING_PAIR=BTC/USDT TIMEFRAME=15m node index.js",
+    "eth": "TRADING_MODE=single TRADING_PAIR=ETH/USDT TIMEFRAME=15m node index.js",
+    "sol": "TRADING_MODE=single TRADING_PAIR=SOL/USDT TIMEFRAME=15m node index.js",
+    "validate": "node validate-config.js",
+    "build": "pkg index.js --out-path dist/",
+    "install-deps": "npm install && echo '✅ Залежності встановлено!'",
+    "quick-setup": "cp .env.example .env && echo '📝 Файл .env створено! Налаштуйте токени.'"
+  },
+  "keywords": [
+    "crypto",
+    "trading",
+    "signals",
+    "bitcoin",
+    "ethereum",
+    "solana",
+    "technical-analysis",
+    "telegram-bot",
+    "multi-pair",
+    "universal"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "dependencies": {
+    "ccxt": "^4.1.78",
+    "axios": "^1.6.2",
+    "node-telegram-bot-api": "^0.64.0",
+    "moment": "^2.29.4",
+    "colors": "^1.4.0",
+    "dotenv": "^16.3.1",
+    "winston": "^3.11.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2",
+    "pkg": "^5.8.1",
+    "jest": "^29.7.0"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/universal-signal-bot.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yourusername/universal-signal-bot/issues"
+  },
+  "homepage": "https://github.com/yourusername/universal-signal-bot#readme"
+}
