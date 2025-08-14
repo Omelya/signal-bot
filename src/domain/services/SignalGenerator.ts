@@ -13,12 +13,14 @@ import {
     MarketDataError,
     ValidationUtil,
     ILogger,
-    TRADING_CONSTANTS
+    TRADING_CONSTANTS, PairCategory
 } from '../../shared';
+import {ISignalRepository} from "../repositories/ISignalRepository";
 
 export class SignalGenerator implements ISignalGenerator {
     constructor(
         private readonly marketAnalyzer: IMarketAnalyzer,
+        private readonly signalRepository: ISignalRepository,
         private readonly logger: ILogger
     ) {}
 
@@ -40,7 +42,6 @@ export class SignalGenerator implements ISignalGenerator {
             // Analyze market if not provided
             const marketAnalysis = analysis || await this.analyzeMarket(marketData, pair);
 
-            // Check if signal should be generated
             const shouldGenerate = await this.shouldGenerateSignal(pair, marketData, marketAnalysis);
             if (!shouldGenerate.should) {
                 this.logger.info(`Signal generation failed for ${pair.symbol}`, shouldGenerate)
@@ -57,7 +58,7 @@ export class SignalGenerator implements ISignalGenerator {
             const signal = await this.createSignal(pair, marketData, marketAnalysis);
 
             // Validate generated signal
-            const validation = await this.validateSignal(signal);
+            const validation = await this.enhancedValidateSignal(signal, marketAnalysis);
             if (!validation.isValid) {
                 this.logger.warn(`Generated signal failed validation`, {
                     symbol: pair.symbol,
@@ -76,7 +77,8 @@ export class SignalGenerator implements ISignalGenerator {
                 signalId: signal.id,
                 direction: signal.direction,
                 confidence: signal.confidence,
-                entry: signal.entry.value
+                entry: signal.entry.value,
+                reasoning: signal.reasoning.length,
             });
 
             return {
@@ -89,11 +91,6 @@ export class SignalGenerator implements ISignalGenerator {
 
         } catch (error: any) {
             this.logger.error(`Failed to generate signal for ${pair.symbol}:`, error);
-
-            if (error instanceof DomainError) {
-                throw error;
-            }
-
             throw new SignalGenerationError(`Signal generation failed: ${error.message}`);
         }
     }
@@ -118,6 +115,47 @@ export class SignalGenerator implements ISignalGenerator {
             this.logger.error(`Error checking if signal can be generated for ${pair.symbol}:`, error);
             return false;
         }
+    }
+
+    async enhancedValidateSignal(
+        signal: Signal,
+        analysis: IMarketAnalysisResult
+    ): Promise<{ isValid: boolean; errors: string[]; warnings: string[] }> {
+        const errors: string[] = [];
+        const warnings: string[] = [];
+
+        // 1. Basic validation
+        const basicValidation = await this.validateSignal(signal);
+        errors.push(...basicValidation.errors);
+        warnings.push(...basicValidation.warnings);
+
+        // 2. Context-aware validation
+        const riskReward = signal.calculateRiskReward();
+        if (riskReward < 1.2) { // Lowered from 1.5
+            warnings.push(`Low risk/reward ratio: ${riskReward.toFixed(2)}`);
+        }
+
+        // 3. Market condition validation
+        if (analysis.trend === 'SIDEWAYS' && signal.confidence < 7) {
+            warnings.push(`Sideways market with medium confidence - high risk`);
+        }
+
+        // 4. Volatility vs targets validation
+        const potentialLoss = signal.getPotentialLoss();
+        if (analysis.volatility === 'HIGH' && potentialLoss > 3) {
+            warnings.push(`High volatility with high potential loss: ${potentialLoss.toFixed(1)}%`);
+        }
+
+        // 5. Volume validation
+        if (analysis.volume === 'LOW' && signal.confidence > 8) {
+            warnings.push(`High confidence signal with low volume - execution risk`);
+        }
+
+        return {
+            isValid: errors.length === 0,
+            errors,
+            warnings
+        };
     }
 
     async validateSignal(signal: Signal): Promise<{
@@ -270,40 +308,64 @@ export class SignalGenerator implements ISignalGenerator {
         marketData: MarketData,
         analysis: IMarketAnalysisResult
     ): Promise<{ should: boolean; reason: string }> {
-        // Check if pair can generate signal
-        if (!await this.canGenerateSignal(pair, marketData)) {
-            return { should: false, reason: 'Pair cannot generate signal at this time' };
+        // 1. Basic checks
+        if (!pair.isActive) {
+            return { should: false, reason: 'Trading pair is not active' };
         }
 
-        // Check market analysis confidence
-        if (analysis.confidence < pair.strategy.minSignalStrength * 10) {
+        if (!pair.canGenerateSignal()) {
+            return { should: false, reason: `Cooldown active: ${pair.getRemainingCooldown()}ms remaining` };
+        }
+
+        if (!marketData.hasSufficientData(TRADING_CONSTANTS.MIN_CANDLES_FOR_ANALYSIS)) {
+            return { should: false, reason: 'Insufficient market data' };
+        }
+
+        if (!marketData.isRecent(15)) { // Збільшено до 15 хвилин
+            return { should: false, reason: 'Market data is stale' };
+        }
+
+        // 2. ПОКРАЩЕНІ умови для сили сигналу
+        const minStrength = this.getAdjustedMinStrength(pair, analysis);
+        if (analysis.strength < minStrength) {
             return {
                 should: false,
-                reason: `Market analysis confidence ${analysis.confidence}% below threshold ${pair.strategy.minSignalStrength * 10}%`
+                reason: `Signal strength ${analysis.strength} below adjusted threshold ${minStrength}`
             };
         }
 
-        // Check if recommendation is actionable
+        // 3. Перевірка впевненості з динамічним порогом
+        const minConfidence = this.getAdjustedMinConfidence(pair, analysis);
+        if (analysis.confidence < minConfidence) {
+            return {
+                should: false,
+                reason: `Analysis confidence ${analysis.confidence}% below threshold ${minConfidence}%`
+            };
+        }
+
+        // 4. Перевірка рекомендації
         if (analysis.recommendation === 'HOLD') {
             return { should: false, reason: 'Market analysis recommends HOLD' };
         }
 
-        // Check signal conditions
+        // 5. ПОКРАЩЕНА перевірка умов сигналу
         const signalConditions = pair.strategy.getSignalConditions();
-        const meetsConditions = this.checkSignalConditions(analysis.indicators, signalConditions);
+        const meetsConditions = this.checkSignalConditions(analysis.indicators, signalConditions, analysis);
 
         if (!meetsConditions.meets) {
             return { should: false, reason: meetsConditions.reason };
         }
 
-        // Check market volatility
-        if (analysis.volatility === 'HIGH' && pair.strategy.type !== 'SCALPING') {
-            return { should: false, reason: 'High volatility unsuitable for strategy type' };
+        // 6. Перевірка ринкових умов
+        const marketSuitability = this.checkMarketSuitability(pair, analysis);
+        if (!marketSuitability.suitable) {
+            return { should: false, reason: marketSuitability.reason };
         }
 
-        // Check volume conditions
-        if (analysis.volume === 'LOW') {
-            return { should: false, reason: 'Low volume conditions' };
+        // 7. Перевірка ризику
+        const riskCheck = await this.checkRiskConditions(pair, marketData, analysis);
+        if (!riskCheck.acceptable) {
+            return { should: false, reason: riskCheck.reason };
         }
 
         return { should: true, reason: 'All conditions met for signal generation' };
@@ -311,26 +373,50 @@ export class SignalGenerator implements ISignalGenerator {
 
     private checkSignalConditions(
         indicators: TechnicalIndicators,
-        conditions: any
+        conditions: any,
+        analysis: IMarketAnalysisResult,
     ): { meets: boolean; reason: string } {
         const overallSignal = indicators.getOverallSignal();
 
-        // Check if we have enough bullish or bearish indicators
+        // 1. Мінімальна кількість сигналів
         const bullishCount = overallSignal.indicators.bullish.length;
         const bearishCount = overallSignal.indicators.bearish.length;
+        const dominantCount = Math.max(bullishCount, bearishCount);
 
-        if (bullishCount < 2 && bearishCount < 2) {
-            return { meets: false, reason: 'Insufficient indicator signals' };
+        const minIndicators = analysis.trend === 'SIDEWAYS' ? 3 : 2;
+        if (dominantCount < minIndicators) {
+            return {
+                meets: false,
+                reason: `Insufficient indicator signals: ${dominantCount} (need ${minIndicators})`
+            };
         }
 
-        // Check signal strength
-        if (overallSignal.strength < 6) {
-            return { meets: false, reason: `Signal strength ${overallSignal.strength} too low` };
+        // 2. Перевірка сили сигналу з урахуванням тренду
+        const minSignalStrength = analysis.trend === 'SIDEWAYS' ? 7 : 5;
+        if (overallSignal.strength < minSignalStrength) {
+            return {
+                meets: false,
+                reason: `Signal strength ${overallSignal.strength} too low (need ${minSignalStrength} for ${analysis.trend})`
+            };
         }
 
-        // Check for divergence
-        if (indicators.hasDivergence()) {
-            return { meets: false, reason: 'Technical indicator divergence detected' };
+        // 3. Менш сувора перевірка дивергенції
+        if (indicators.hasDivergence() && analysis.confidence < 70) {
+            return {
+                meets: false,
+                reason: 'Technical indicator divergence with low confidence'
+            };
+        }
+
+        // 4. Перевірка momentum для сильних сигналів
+        if (analysis.strength >= 8) {
+            const adx = indicators.values.adx;
+            if (adx < 20) {
+                return {
+                    meets: false,
+                    reason: `Weak momentum (ADX: ${adx.toFixed(1)}) for strong signal`
+                };
+            }
         }
 
         return { meets: true, reason: 'Signal conditions satisfied' };
@@ -344,17 +430,17 @@ export class SignalGenerator implements ISignalGenerator {
         // Determine signal direction
         const direction = this.determineSignalDirection(analysis);
 
-        // Calculate entry price
+        // Calculate entry price with spread consideration
         const entryPrice = this.calculateEntryPrice(marketData, direction, analysis);
 
-        // Calculate targets
+        // Calculate targets with market conditions
         const targets = this.calculateTargets(entryPrice, direction, pair, analysis);
 
-        // Calculate confidence
-        const confidence = this.calculateConfidence(analysis, pair);
+        // Calculate confidence with market context
+        const confidence = this.calculateSignalConfidence(analysis, pair);
 
-        // Generate reasoning
-        const reasoning = this.generateReasoning(analysis, direction);
+        // Generate enhanced reasoning
+        const reasoning = this.generateReasoning(analysis, direction, pair);
 
         return Signal.create({
             pair: pair.symbol,
@@ -365,7 +451,7 @@ export class SignalGenerator implements ISignalGenerator {
             reasoning,
             exchange: pair.exchange,
             timeframe: pair.strategy.timeframe,
-            strategy: pair.strategy.name
+            strategy: `${pair.strategy.name} (Enhanced)`
         });
     }
 
@@ -392,18 +478,34 @@ export class SignalGenerator implements ISignalGenerator {
         analysis: IMarketAnalysisResult
     ): Price {
         const currentPrice = marketData.currentPrice;
-        const indicators = analysis.indicators;
+        const volatility = analysis.volatility;
+        const volume = analysis.volume;
 
-        // For LONG signals, enter slightly above current price
-        // For SHORT signals, enter slightly below current price
+        // Базовий спред
+        let spread = 0.001; // 0.1%
+
+        // Adjust spread based on volatility
+        if (volatility === 'HIGH') {
+            spread = 0.002; // 0.2%
+        } else if (volatility === 'LOW') {
+            spread = 0.0005; // 0.05%
+        }
+
+        // Adjust spread based on volume
+        if (volume === 'LOW') {
+            spread *= 1.5; // Збільшуємо спред при низькому об'ємі
+        } else if (volume === 'HIGH') {
+            spread *= 0.8; // Зменшуємо спред при високому об'ємі
+        }
+
         let entryPrice = currentPrice;
 
         if (direction === SignalDirection.LONG) {
-            // Enter at current price or slightly above (market buy)
-            entryPrice = currentPrice * 1.001; // 0.1% above
+            // Для LONG входимо трохи вище для гарантованого виконання
+            entryPrice = currentPrice * (1 + spread);
         } else {
-            // Enter at current price or slightly below (market sell)
-            entryPrice = currentPrice * 0.999; // 0.1% below
+            // Для SHORT входимо трохи нижче
+            entryPrice = currentPrice * (1 - spread);
         }
 
         return Price.fromNumber(entryPrice, 'USDT');
@@ -419,124 +521,128 @@ export class SignalGenerator implements ISignalGenerator {
         const riskManagement = strategy.risk;
         const entry = entryPrice.value;
 
+        // Adjust targets based on market conditions
+        const volatilityMultiplier = this.getVolatilityMultiplier(analysis.volatility);
+        const trendMultiplier = this.getTrendMultiplier(analysis.trend, analysis.strength);
+        const volumeMultiplier = this.getVolumeMultiplier(analysis.volume);
+
+        // Combined multiplier
+        const totalMultiplier = volatilityMultiplier * trendMultiplier * volumeMultiplier;
+
         let stopLoss: number;
         let takeProfits: number[];
 
         if (direction === SignalDirection.LONG) {
             // Stop loss below entry
-            stopLoss = entry * (1 - riskManagement.stopLoss);
+            stopLoss = entry * (1 - riskManagement.stopLoss * totalMultiplier);
 
             // Take profits above entry
             takeProfits = riskManagement.takeProfits.map(tpRatio =>
-                entry * (1 + tpRatio)
+                entry * (1 + tpRatio * totalMultiplier)
             );
         } else {
             // Stop loss above entry
-            stopLoss = entry * (1 + riskManagement.stopLoss);
+            stopLoss = entry * (1 + riskManagement.stopLoss * totalMultiplier);
 
             // Take profits below entry
             takeProfits = riskManagement.takeProfits.map(tpRatio =>
-                entry * (1 - tpRatio)
+                entry * (1 - tpRatio * totalMultiplier)
             );
         }
 
-        // Adjust for volatility
-        if (analysis.volatility === 'HIGH') {
-            const volatilityMultiplier = 1.2;
+        // Ensure minimum risk/reward ratio
+        const minRiskReward = 1.5;
+        if (direction === SignalDirection.LONG) {
+            const risk = entry - stopLoss;
+            const minReward = risk * minRiskReward;
 
-            if (direction === SignalDirection.LONG) {
-                stopLoss = entry * (1 - riskManagement.stopLoss * volatilityMultiplier);
-                takeProfits = takeProfits.map(tp => entry + (tp - entry) * volatilityMultiplier);
-            } else {
-                stopLoss = entry * (1 + riskManagement.stopLoss * volatilityMultiplier);
-                takeProfits = takeProfits.map(tp => entry - (entry - tp) * volatilityMultiplier);
-            }
+            takeProfits = takeProfits.map((tp, index) => {
+                const currentReward = tp - entry;
+                if (currentReward < minReward) {
+                    return entry + minReward * (index + 1) * 0.8; // Graduated targets
+                }
+                return tp;
+            });
+        } else {
+            const risk = stopLoss - entry;
+            const minReward = risk * minRiskReward;
+
+            takeProfits = takeProfits.map((tp, index) => {
+                const currentReward = entry - tp;
+                if (currentReward < minReward) {
+                    return entry - minReward * (index + 1) * 0.8; // Graduated targets
+                }
+                return tp;
+            });
         }
 
         return {
             stopLoss,
-            takeProfits
+            takeProfits: takeProfits.slice(0, 3)
         };
     }
 
-    private calculateConfidence(analysis: IMarketAnalysisResult, pair: TradingPair): number {
-        let confidence = analysis.confidence / 10; // Convert from 0-100 to 0-10
-
-        // Adjust based on signal strength
-        confidence += analysis.strength * 0.1;
-
-        // Adjust based on volume
-        if (analysis.volume === 'HIGH') {
-            confidence += 0.5;
-        } else if (analysis.volume === 'LOW') {
-            confidence -= 1;
-        }
-
-        // Adjust based on volatility for strategy type
-        if (analysis.volatility === 'HIGH' && pair.strategy.type === 'SCALPING') {
-            confidence += 0.5; // High volatility is good for scalping
-        } else if (analysis.volatility === 'HIGH') {
-            confidence -= 0.5; // High volatility is risky for other strategies
-        }
-
-        // Adjust based on trend alignment
-        const overallSignal = analysis.indicators.getOverallSignal();
-        if (analysis.trend === 'BULLISH' && overallSignal.direction === 'BUY') {
-            confidence += 0.5;
-        } else if (analysis.trend === 'BEARISH' && overallSignal.direction === 'SELL') {
-            confidence += 0.5;
-        }
-
-        // Ensure confidence is within valid range
-        return Math.max(1, Math.min(10, Math.round(confidence * 10) / 10));
-    }
-
-    private generateReasoning(analysis: IMarketAnalysisResult, direction: SignalDirection): string[] {
+    private generateReasoning(
+        analysis: IMarketAnalysisResult,
+        direction: SignalDirection,
+        pair: TradingPair,
+    ): string[] {
         const reasoning: string[] = [];
         const overallSignal = analysis.indicators.getOverallSignal();
+        const statistics = analysis.marketData.getStatistics();
 
-        // Add direction-specific reasoning
-        if (direction === SignalDirection.LONG) {
-            reasoning.push(`LONG signal: ${overallSignal.indicators.bullish.join(', ')} indicators are bullish`);
-        } else {
-            reasoning.push(`SHORT signal: ${overallSignal.indicators.bearish.join(', ')} indicators are bearish`);
+        // 1. Main signal reason
+        const directionText = direction === SignalDirection.LONG ? 'LONG' : 'SHORT';
+        const trendText = analysis.trend.toLowerCase();
+        reasoning.push(`${directionText} сигнал в ${trendText} тренді (сила: ${analysis.strength}/10)`);
+
+        // 2. Price movement
+        const priceChange = statistics.priceChangePercent;
+        if (Math.abs(priceChange) > 2) {
+            const changeText = priceChange > 0 ? 'зросла' : 'впала';
+            reasoning.push(`Ціна ${changeText} на ${Math.abs(priceChange).toFixed(1)}% за 24h`);
         }
 
-        // Add trend reasoning
-        if (analysis.trend !== 'SIDEWAYS') {
-            reasoning.push(`Market trend is ${analysis.trend.toLowerCase()}`);
+        // 3. Technical indicators (top 3)
+        const indicators = direction === SignalDirection.LONG
+            ? overallSignal.indicators.bullish
+            : overallSignal.indicators.bearish;
+
+        if (indicators.length > 0) {
+            const topIndicators = indicators.slice(0, 3).join(', ');
+            reasoning.push(`Технічні індикатори: ${topIndicators}`);
         }
 
-        // Add volume reasoning
+        // 4. Volume confirmation
         if (analysis.volume === 'HIGH') {
-            reasoning.push('High volume confirms price movement');
+            reasoning.push(`Високий об'єм (${(statistics.totalVolume / 1000000).toFixed(1)}M) підтверджує рух`);
+        } else if (analysis.volume === 'LOW') {
+            reasoning.push(`Низький об'єм - обережно з розміром позиції`);
         }
 
-        // Add volatility reasoning
-        if (analysis.volatility === 'LOW') {
-            reasoning.push('Low volatility suggests stable market conditions');
-        } else if (analysis.volatility === 'HIGH') {
-            reasoning.push('High volatility presents both opportunity and risk');
+        // 5. Volatility context
+        if (analysis.volatility === 'HIGH') {
+            reasoning.push(`Висока волатільність - потенціал швидкого прибутку і ризику`);
         }
 
-        // Add confidence reasoning
-        if (analysis.confidence > 80) {
-            reasoning.push('High confidence signal based on multiple confirmations');
-        } else if (analysis.confidence > 60) {
-            reasoning.push('Moderate confidence signal with good technical setup');
+        // 6. Strategy-specific reasoning
+        if (pair.strategy.type === 'SCALPING' && analysis.volatility === 'HIGH') {
+            reasoning.push(`Скальпінг стратегія оптимальна для високої волатільності`);
         }
 
-        // Add strength reasoning
-        if (analysis.strength >= 8) {
-            reasoning.push('Strong technical signal with clear direction');
+        // 7. Risk/Reward note
+        reasoning.push(`Ризик/прибуток співвідношення оптимізовано для поточних умов`);
+
+        // 8. Warnings if any
+        if (analysis.indicators.hasDivergence()) {
+            reasoning.push(`⚠️ Розбіжність між індикаторами - зменшіть розмір позиції`);
         }
 
-        // Add any specific pattern or condition reasoning
-        if (analysis.reasoning.length > 0) {
-            reasoning.push(...analysis.reasoning.slice(0, 2)); // Take first 2 analysis reasons
+        if (analysis.confidence < 60) {
+            reasoning.push(`⚠️ Помірна впевненість (${analysis.confidence}%) - торгуйте обережно`);
         }
 
-        return reasoning;
+        return reasoning.slice(0, 6); // Maximum 6 reasons
     }
 
     private optimizeTargets(signal: Signal, marketConditions: any): ISignalTargets {
@@ -615,5 +721,221 @@ export class SignalGenerator implements ISignalGenerator {
 
         // Ensure confidence stays within valid range
         return Math.max(1, Math.min(10, optimizedConfidence));
+    }
+
+    private getAdjustedMinStrength(pair: TradingPair, analysis: IMarketAnalysisResult): number {
+        let baseStrength = pair.strategy.minSignalStrength;
+
+        // Зменшуємо поріг для сильних трендів
+        if (analysis.trend !== 'SIDEWAYS') {
+            const priceChange = Math.abs(analysis.marketData.getStatistics().priceChangePercent);
+            if (priceChange > 5) baseStrength -= 2;
+            else if (priceChange > 3) baseStrength -= 1;
+        }
+
+        // Зменшуємо поріг для високого об'єму
+        if (analysis.volume === 'HIGH') {
+            baseStrength -= 1;
+        }
+
+        // Збільшуємо поріг для MEME coins (більший ризик)
+        if (pair.category === PairCategory.MEME) {
+            baseStrength += 0.5;
+        }
+
+        // Зменшуємо поріг для основних криптовалют
+        if (pair.category === PairCategory.CRYPTO_MAJOR) {
+            baseStrength -= 0.5;
+        }
+
+        return Math.max(3, Math.min(8, baseStrength)); // Межі 3-8
+    }
+
+    private getAdjustedMinConfidence(pair: TradingPair, analysis: IMarketAnalysisResult): number {
+        let baseConfidence = 50; // Базовий поріг
+
+        // Підвищуємо для бічного тренду
+        if (analysis.trend === 'SIDEWAYS') {
+            baseConfidence += 15;
+        }
+
+        // Знижуємо для сильних трендів
+        if (analysis.trend !== 'SIDEWAYS') {
+            const priceChange = Math.abs(analysis.marketData.getStatistics().priceChangePercent);
+            if (priceChange > 5) baseConfidence -= 15;
+            else if (priceChange > 3) baseConfidence -= 10;
+        }
+
+        // Підвищуємо для високої волатільності без тренду
+        if (analysis.volatility === 'HIGH' && analysis.trend === 'SIDEWAYS') {
+            baseConfidence += 10;
+        }
+
+        return Math.max(30, Math.min(80, baseConfidence));
+    }
+
+    private checkMarketSuitability(
+        pair: TradingPair,
+        analysis: IMarketAnalysisResult
+    ): { suitable: boolean; reason: string } {
+
+        // 1. Перевірка стратегії vs волатільність
+        if (analysis.volatility === 'HIGH' && pair.strategy.type !== 'SCALPING' && analysis.trend === 'SIDEWAYS') {
+            return {
+                suitable: false,
+                reason: 'High volatility unsuitable for non-scalping strategy in sideways market'
+            };
+        }
+
+        // 2. Менш сувора перевірка об'єму
+        if (analysis.volume === 'LOW' && analysis.strength < 7) {
+            return {
+                suitable: false,
+                reason: 'Low volume with weak signal strength'
+            };
+        }
+
+        // 3. Перевірка часу торгівлі
+        if (!pair.isGoodTimeToTrade()) {
+            return {
+                suitable: false,
+                reason: 'Not a good time to trade based on pair settings'
+            };
+        }
+
+        return { suitable: true, reason: 'Market conditions suitable' };
+    }
+
+    private async checkRiskConditions(
+        pair: TradingPair,
+        marketData: MarketData,
+        analysis: IMarketAnalysisResult
+    ): Promise<{ acceptable: boolean; reason: string }> {
+
+        // 1. Перевірка максимальної кількості сигналів (менш сувора)
+        const activeSignals = await this.getActiveSignalsCount();
+        const maxSignals = pair.strategy.maxSimultaneousSignals + 2; // +2 buffer
+
+        if (activeSignals >= maxSignals) {
+            return {
+                acceptable: false,
+                reason: `Max simultaneous signals reached: ${activeSignals}/${maxSignals}`
+            };
+        }
+
+        // 2. Перевірка на основі категорії пари
+        if (pair.category === PairCategory.MEME && analysis.volatility === 'HIGH' && analysis.confidence < 70) {
+            return {
+                acceptable: false,
+                reason: 'High-risk MEME coin with high volatility and low confidence'
+            };
+        }
+
+        // 3. Перевірка свіжості даних
+        const dataAge = marketData.getAgeInMinutes();
+        if (dataAge > 10 && analysis.strength < 7) {
+            return {
+                acceptable: false,
+                reason: `Stale data (${dataAge}m) with weak signal`
+            };
+        }
+
+        return { acceptable: true, reason: 'Risk conditions acceptable' };
+    }
+
+    private getVolatilityMultiplier(volatility: 'LOW' | 'MEDIUM' | 'HIGH'): number {
+        switch (volatility) {
+            case 'HIGH': return 1.3;
+            case 'MEDIUM': return 1.0;
+            case 'LOW': return 0.8;
+        }
+    }
+
+    private getTrendMultiplier(trend: 'BULLISH' | 'BEARISH' | 'SIDEWAYS', strength: number): number {
+        if (trend === 'SIDEWAYS') return 0.8;
+
+        // Strong trends allow for wider targets
+        if (strength >= 8) return 1.2;
+        if (strength >= 6) return 1.1;
+        return 1.0;
+    }
+
+    private getVolumeMultiplier(volume: 'LOW' | 'NORMAL' | 'HIGH'): number {
+        switch (volume) {
+            case 'HIGH': return 1.1; // Higher targets with high volume
+            case 'NORMAL': return 1.0;
+            case 'LOW': return 0.9; // Conservative targets with low volume
+        }
+    }
+
+    private calculateSignalConfidence(
+        analysis: IMarketAnalysisResult,
+        pair: TradingPair
+    ): number {
+        let confidence = analysis.confidence / 10; // Convert from 0-100 to 0-10
+
+        // Adjust based on analysis strength
+        confidence += analysis.strength * 0.1;
+
+        // Trend bonus
+        if (analysis.trend !== 'SIDEWAYS') {
+            confidence += 1;
+
+            // Extra bonus for strong price movements
+            const priceChange = Math.abs(analysis.marketData.getStatistics().priceChangePercent);
+            if (priceChange > 5) confidence += 1;
+            if (priceChange > 3) confidence += 0.5;
+        }
+
+        // Volume bonus
+        if (analysis.volume === 'HIGH') {
+            confidence += 0.5;
+        } else if (analysis.volume === 'LOW') {
+            confidence -= 1;
+        }
+
+        // Volatility adjustment based on strategy
+        if (analysis.volatility === 'HIGH') {
+            if (pair.strategy.type === 'SCALPING') {
+                confidence += 0.5; // Good for scalping
+            } else if (analysis.trend === 'SIDEWAYS') {
+                confidence -= 0.5; // Risky for other strategies
+            }
+        }
+
+        // Category-based adjustments
+        switch (pair.category) {
+            case PairCategory.CRYPTO_MAJOR:
+                confidence += 0.3; // More reliable
+                break;
+            case PairCategory.MEME:
+                confidence -= 0.3; // More risky
+                break;
+            default:
+                break;
+        }
+
+        // Technical confirmation bonus
+        const overallSignal = analysis.indicators.getOverallSignal();
+        const indicatorAlignment = overallSignal.indicators.bullish.length + overallSignal.indicators.bearish.length;
+        confidence += indicatorAlignment * 0.1;
+
+        // Penalty for divergence
+        if (analysis.indicators.hasDivergence()) {
+            confidence -= 1;
+        }
+
+        return Math.max(1, Math.min(10, Math.round(confidence * 10) / 10));
+    }
+
+    private async getActiveSignalsCount(): Promise<number> {
+        try {
+            const activeSignals = await this.signalRepository.findActive();
+            return activeSignals.length;
+        } catch (error: any) {
+            this.logger.error('Failed to get active signals count:', error);
+            // Fallback: повертаємо 0 у випадку помилки, щоб не блокувати генерацію
+            return 0;
+        }
     }
 }

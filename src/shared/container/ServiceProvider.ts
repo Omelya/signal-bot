@@ -143,8 +143,9 @@ export class ServiceProvider {
         container.register('signalGenerator', (c) => {
             const SignalGenerator = require('../../domain/services/SignalGenerator').SignalGenerator;
             const marketAnalyzer = c.get('marketAnalyzer');
+            const signalRepository = c.get('signalRepository');
             const logger = c.get('logger');
-            return new SignalGenerator(marketAnalyzer, logger);
+            return new SignalGenerator(marketAnalyzer, signalRepository, logger);
         }, { dependencies: ['marketAnalyzer', 'logger'] });
 
         // Notification service

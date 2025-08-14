@@ -12,42 +12,31 @@ export class MarketAnalyzer implements IMarketAnalyzer {
 
     async analyze(marketData: MarketData, strategy?: any): Promise<IMarketAnalysisResult> {
         try {
-            this.logger.debug(`Analyzing market data for ${marketData.symbol}`, {
-                symbol: marketData.symbol,
-                exchange: marketData.exchange,
-                timeframe: marketData.timeframe,
-                candleCount: marketData.candleCount
-            });
-
-            // Validate market data
             this.validateMarketData(marketData);
 
-            // Calculate technical indicators
             const indicatorValues = await this.calculateIndicators(marketData, strategy);
             const indicators = TechnicalIndicators.create(indicatorValues);
 
-            // Analyze trend
-            const trend = this.analyzeTrend(indicators);
+            const trend = this.analyzeTrend(indicators, marketData);
 
-            // Calculate strength
-            const strength = this.calculateStrength(indicators, marketData);
+            const strength = this.calculateStrength(indicators, marketData, trend);
 
-            // Assess volatility
             const volatility = this.assessVolatility(marketData, indicatorValues);
-
-            // Analyze volume
             const volume = this.analyzeVolume(marketData, indicatorValues);
 
-            // Generate recommendation
-            const recommendation = this.generateRecommendation(indicators, trend, strength, volatility, volume);
+            const recommendation = this.generateRecommendation(
+                indicators, trend, strength, volatility, volume, marketData
+            );
 
-            // Calculate confidence
-            const confidence = this.calculateConfidence(indicators, trend, strength, volatility, volume);
+            const confidence = this.calculateConfidence(
+                indicators, trend, strength, volatility, volume, marketData
+            );
 
-            // Generate reasoning
-            const reasoning = this.generateReasoning(indicators, trend, strength, volatility, volume);
+            const reasoning = this.generateReasoning(
+                indicators, trend, strength, volatility, volume, marketData
+            );
 
-            const result: IMarketAnalysisResult = {
+            return {
                 marketData,
                 indicators,
                 trend,
@@ -56,20 +45,8 @@ export class MarketAnalyzer implements IMarketAnalyzer {
                 volume,
                 recommendation,
                 confidence,
-                reasoning
+                reasoning,
             };
-
-            this.logger.info(`Market analysis completed for ${marketData.symbol}`, {
-                trend,
-                strength,
-                volatility,
-                volume,
-                recommendation,
-                confidence,
-                reasoningCount: reasoning.length
-            });
-
-            return result;
 
         } catch (error: any) {
             this.logger.error(`Failed to analyze market data for ${marketData.symbol}:`, error);
@@ -197,39 +174,139 @@ export class MarketAnalyzer implements IMarketAnalyzer {
         }
     }
 
-    private analyzeTrend(indicators: TechnicalIndicators): 'BULLISH' | 'BEARISH' | 'SIDEWAYS' {
+    private analyzeTrend(indicators: TechnicalIndicators, marketData: MarketData): 'BULLISH' | 'BEARISH' | 'SIDEWAYS' {
         const overallSignal = indicators.getOverallSignal();
+        const statistics = marketData.getStatistics();
 
-        if (overallSignal.direction === 'BUY' && overallSignal.strength >= 6) {
-            return 'BULLISH';
-        } else if (overallSignal.direction === 'SELL' && overallSignal.strength >= 6) {
+        // 1. Аналіз цінового руху (найважливіше!)
+        const priceChange24h = statistics.priceChangePercent;
+        const priceChange = marketData.getPriceChange(5); // Останні 5 періодів
+
+        // 2. Аналіз положення відносно MA
+        const currentPrice = marketData.currentPrice;
+        const ema = indicators.values.ema;
+        const priceVsMA = {
+            aboveShort: currentPrice > ema.short,
+            aboveMedium: currentPrice > ema.medium,
+            aboveLong: currentPrice > ema.long
+        };
+
+        // 3. Momentum аналіз
+        const macdSignal = indicators.macdSignal;
+        const rsiSignal = indicators.rsiSignal;
+
+        // 4. Аналіз Volume (ТЕПЕР ВИКОРИСТОВУЄТЬСЯ!)
+        const isHighVolume = indicators.isVolumeAboveAverage;
+
+        // === СИЛЬНИЙ ВЕДМЕЖИЙ ТРЕНД ===
+        if (
+            priceChange24h < -3 || // Падіння > 3%
+            (priceChange.percentage < -2 && !priceVsMA.aboveShort && isHighVolume) || // Недавнє падіння + під коротким MA + високий об'єм
+            (macdSignal === 'SELL' && rsiSignal === 'SELL' && !priceVsMA.aboveMedium)
+        ) {
             return 'BEARISH';
-        } else {
+        }
+
+        // === СИЛЬНИЙ БИЧАЧИЙ ТРЕНД ===
+        if (
+            priceChange24h > 3 || // Зростання > 3%
+            (priceChange.percentage > 2 && priceVsMA.aboveShort && isHighVolume) || // Недавнє зростання + над коротким MA + високий об'єм
+            (macdSignal === 'BUY' && rsiSignal === 'BUY' && priceVsMA.aboveMedium)
+        ) {
+            return 'BULLISH';
+        }
+
+        // === БІЧНИЙ ТРЕНД ===
+        // Якщо немає сильних сигналів і ціна коливається
+        if (
+            Math.abs(priceChange24h) < 2 &&
+            Math.abs(priceChange.percentage) < 1.5 &&
+            overallSignal.strength < 7
+        ) {
             return 'SIDEWAYS';
         }
+
+        // === СЛАБКІ СИГНАЛИ ===
+        // Базуємося на індикаторах, але з обережністю
+        if (overallSignal.direction === 'BUY' && overallSignal.strength >= 5) {
+            // ПОКРАЩЕННЯ: Враховуємо об'єм для підтвердження
+            if (priceVsMA.aboveShort && isHighVolume) {
+                return 'BULLISH'; // Сильне підтвердження
+            } else if (priceVsMA.aboveShort) {
+                return 'BULLISH'; // Слабке підтвердження
+            } else {
+                return isHighVolume ? 'SIDEWAYS' : 'SIDEWAYS'; // Без підтвердження ціни
+            }
+        }
+
+        if (overallSignal.direction === 'SELL' && overallSignal.strength >= 5) {
+            // ПОКРАЩЕННЯ: Враховуємо об'єм для підтвердження
+            if (!priceVsMA.aboveShort && isHighVolume) {
+                return 'BEARISH'; // Сильне підтвердження
+            } else if (!priceVsMA.aboveShort) {
+                return 'BEARISH'; // Слабке підтвердження
+            } else {
+                return isHighVolume ? 'SIDEWAYS' : 'SIDEWAYS'; // Без підтвердження ціни
+            }
+        }
+
+        // === ДОДАТКОВА ЛОГІКА З ОБ'ЄМОМ ===
+        // Високий об'єм без чіткого тренду може сигналізувати про розворот
+        if (isHighVolume && Math.abs(priceChange24h) < 1) {
+            // Акумуляція або розподіл - потребує додаткового аналізу
+            if (priceVsMA.aboveMedium && priceVsMA.aboveLong) {
+                return 'BULLISH'; // Можлива акумуляція у висхідному тренді
+            } else if (!priceVsMA.aboveMedium && !priceVsMA.aboveLong) {
+                return 'BEARISH'; // Можливий розподіл у спадному тренді
+            }
+        }
+
+        return 'SIDEWAYS';
     }
 
-    private calculateStrength(indicators: TechnicalIndicators, marketData: MarketData): number {
-        const overallSignal = indicators.getOverallSignal();
-        let strength = overallSignal.strength;
+    private calculateStrength(
+        indicators: TechnicalIndicators,
+        marketData: MarketData,
+        trend: 'BULLISH' | 'BEARISH' | 'SIDEWAYS',
+    ): number {
+        let strength = indicators.getOverallSignal().strength;
+        const statistics = marketData.getStatistics();
 
-        // Adjust strength based on volume
+        // 1. Bonus за підтвердження тренду ціною
+        const priceChange = Math.abs(statistics.priceChangePercent);
+        if (trend !== 'SIDEWAYS') {
+            if (priceChange > 5) strength += 2;
+            else if (priceChange > 3) strength += 1.5;
+            else if (priceChange > 1.5) strength += 1;
+        }
+
+        // 2. Bonus за об'єм
         if (indicators.isVolumeAboveAverage) {
             strength += 1;
         }
+        if (indicators.isHighVolume) {
+            strength += 0.5;
+        }
 
-        // Adjust strength based on trend consistency
-        if (marketData.isMakingHigherHighs(5) || marketData.isMakingLowerLows(5)) {
+        // 3. Bonus за momentum
+        const adx = indicators.values.adx;
+        if (adx > 25) strength += 1;
+        if (adx > 40) strength += 0.5;
+
+        // 4. Penalty за протиріччя
+        if (trend === 'SIDEWAYS' && indicators.hasDivergence()) {
+            strength -= 1;
+        }
+
+        // 5. Bonus за послідовність свічок
+        if (marketData.isMakingHigherHighs(3) && trend === 'BULLISH') {
+            strength += 1;
+        }
+        if (marketData.isMakingLowerLows(3) && trend === 'BEARISH') {
             strength += 1;
         }
 
-        // Adjust strength based on indicator alignment
-        const marketCondition = indicators.getMarketCondition();
-        if (marketCondition.momentum === 'STRONG') {
-            strength += 1;
-        }
-
-        return Math.min(10, Math.max(0, strength));
+        return Math.max(0, Math.min(10, Math.round(strength * 10) / 10));
     }
 
     private assessVolatility(marketData: MarketData, indicators: ITechnicalIndicatorValues): 'LOW' | 'MEDIUM' | 'HIGH' {
@@ -252,14 +329,34 @@ export class MarketAnalyzer implements IMarketAnalyzer {
 
     private analyzeVolume(marketData: MarketData, indicators: ITechnicalIndicatorValues): 'LOW' | 'NORMAL' | 'HIGH' {
         const volumeProfile = indicators.volumeProfile;
+        const statistics = marketData.getStatistics();
 
-        if (volumeProfile.ratio > 2.0) {
-            return 'HIGH';
-        } else if (volumeProfile.ratio > 1.3) {
-            return 'NORMAL';
-        } else {
-            return 'LOW';
-        }
+        // 1. Базовий аналіз за співвідношенням
+        let volumeScore = this.calculateBaseVolumeScore(volumeProfile.ratio);
+
+        // 2. Коригування за ціновим рухом
+        const priceVolumeAdjustment = this.analyzePriceVolumeRelationship(
+            statistics.priceChangePercent,
+            volumeProfile.ratio
+        );
+        volumeScore += priceVolumeAdjustment;
+
+        // 3. Коригування за часом (деякі періоди мають природно вищий об'єм)
+        const timeAdjustment = this.getTimeBasedVolumeAdjustment(marketData);
+        volumeScore += timeAdjustment;
+
+        // 4. Аналіз тренду об'єму
+        const volumeTrendAdjustment = this.analyzeVolumeTrend(marketData, indicators);
+        volumeScore += volumeTrendAdjustment;
+
+        // 5. Коригування за волатільністю
+        const volatilityAdjustment = this.getVolatilityVolumeAdjustment(
+            statistics.volatility,
+            volumeProfile.ratio
+        );
+        volumeScore += volatilityAdjustment;
+
+        return this.determineVolumeCategory(volumeScore);
     }
 
     private generateRecommendation(
@@ -267,29 +364,85 @@ export class MarketAnalyzer implements IMarketAnalyzer {
         trend: 'BULLISH' | 'BEARISH' | 'SIDEWAYS',
         strength: number,
         volatility: 'LOW' | 'MEDIUM' | 'HIGH',
-        volume: 'LOW' | 'NORMAL' | 'HIGH'
+        volume: 'LOW' | 'NORMAL' | 'HIGH',
+        marketData: MarketData,
     ): 'STRONG_BUY' | 'BUY' | 'HOLD' | 'SELL' | 'STRONG_SELL' {
         const overallSignal = indicators.getOverallSignal();
+        const statistics = marketData.getStatistics();
 
-        // Strong signals with good conditions
-        if (overallSignal.direction === 'BUY' && strength >= 8 && volume !== 'LOW') {
-            return 'STRONG_BUY';
+        // === STRONG SIGNALS ===
+        if (trend === 'BEARISH' && strength >= 7 && volume !== 'LOW') {
+            // ДОДАНО: Волатільність впливає на силу рекомендації
+            if (volatility === 'HIGH' && statistics.priceChangePercent < -7) {
+                return 'STRONG_SELL'; // Висока волатільність + сильне падіння
+            }
+            return statistics.priceChangePercent < -5 ? 'STRONG_SELL' : 'SELL';
         }
 
-        if (overallSignal.direction === 'SELL' && strength >= 8 && volume !== 'LOW') {
-            return 'STRONG_SELL';
+        if (trend === 'BULLISH' && strength >= 7 && volume !== 'LOW') {
+            // ДОДАНО: Волатільність впливає на силу рекомендації
+            if (volatility === 'HIGH' && statistics.priceChangePercent > 7) {
+                return 'STRONG_BUY'; // Висока волатільність + сильне зростання
+            }
+            return statistics.priceChangePercent > 5 ? 'STRONG_BUY' : 'BUY';
         }
 
-        // Regular signals
-        if (overallSignal.direction === 'BUY' && strength >= 6) {
-            return 'BUY';
-        }
-
-        if (overallSignal.direction === 'SELL' && strength >= 6) {
+        // === MEDIUM SIGNALS ===
+        if (trend === 'BEARISH' && strength >= 5) {
+            // ДОДАНО: Коригування за волатільністю
+            if (volatility === 'HIGH' && strength < 6) {
+                return 'HOLD'; // Висока волатільність + слабша сила = обережність
+            }
             return 'SELL';
         }
 
-        // Default to hold for weak or conflicting signals
+        if (trend === 'BULLISH' && strength >= 5) {
+            // ДОДАНО: Коригування за волатільністю
+            if (volatility === 'HIGH' && strength < 6) {
+                return 'HOLD'; // Висока волатільність + слабша сила = обережність
+            }
+            return 'BUY';
+        }
+
+        // === SIDEWAYS HANDLING ===
+        if (trend === 'SIDEWAYS') {
+            // В боковому тренді - обережність
+            if (strength >= 8 && volume === 'HIGH') {
+                // ДОДАНО: Висока волатільність у боковому тренді = особлива обережність
+                if (volatility === 'HIGH') {
+                    return 'HOLD'; // Занадто ризиковано
+                }
+                return overallSignal.direction === 'BUY' ? 'BUY' : 'SELL';
+            }
+            return 'HOLD';
+        }
+
+        // === WEAK SIGNALS ===
+        if (strength >= 6 && volume !== 'LOW') {
+            // ДОДАНО: Волатільність впливає на слабкі сигнали
+            if (volatility === 'HIGH') {
+                return 'HOLD'; // Висока волатільність робить слабкі сигнали ненадійними
+            }
+
+            // ДОДАНО: Низька волатільність сприяє слабким сигналам
+            if (volatility === 'LOW') {
+                return overallSignal.direction === 'BUY' ? 'BUY' : 'SELL';
+            }
+
+            // Середня волатільність - стандартна логіка
+            return overallSignal.direction === 'BUY' ? 'BUY' : 'SELL';
+        }
+
+        // === ДОДАТКОВА ЛОГІКА З ВОЛАТІЛЬНІСТЮ ===
+        // Якщо всі інші умови не спрацювали, але є висока волатільність
+        if (volatility === 'HIGH' && strength >= 4) {
+            // Висока волатільність може створювати можливості навіть при слабших сигналах
+            // але тільки при достатньому об'ємі
+            if (volume === 'HIGH' && Math.abs(statistics.priceChangePercent) > 3) {
+                return overallSignal.direction === 'BUY' ? 'BUY' : 'SELL';
+            }
+        }
+
         return 'HOLD';
     }
 
@@ -298,35 +451,53 @@ export class MarketAnalyzer implements IMarketAnalyzer {
         trend: 'BULLISH' | 'BEARISH' | 'SIDEWAYS',
         strength: number,
         volatility: 'LOW' | 'MEDIUM' | 'HIGH',
-        volume: 'LOW' | 'NORMAL' | 'HIGH'
+        volume: 'LOW' | 'NORMAL' | 'HIGH',
+        marketData: MarketData,
     ): number {
-        let confidence = strength * 10; // Base confidence from strength
+        let confidence = strength * 10; // Базова впевненість
 
-        // Adjust for trend clarity
+        const statistics = marketData.getStatistics();
+        const priceChange = Math.abs(statistics.priceChangePercent);
+
+        // 1. Trend consistency bonus
         if (trend !== 'SIDEWAYS') {
-            confidence += 10;
+            confidence += 15;
+
+            // Extra bonus for strong price movement
+            if (priceChange > 3) confidence += 10;
+            if (priceChange > 5) confidence += 5;
         }
 
-        // Adjust for volume
-        if (volume === 'HIGH') {
-            confidence += 10;
-        } else if (volume === 'LOW') {
-            confidence -= 15;
+        // 2. Volume confirmation
+        if (volume === 'HIGH') confidence += 15;
+        else if (volume === 'NORMAL') confidence += 5;
+        else confidence -= 10;
+
+        // 3. Indicator alignment
+        const overallSignal = indicators.getOverallSignal();
+        const alignmentBonus = overallSignal.indicators.bullish.length + overallSignal.indicators.bearish.length;
+        confidence += alignmentBonus * 3;
+
+        // 4. Volatility adjustment
+        if (volatility === 'HIGH' && trend !== 'SIDEWAYS') {
+            confidence += 5; // Високa волатильність + тренд = можливість
+        } else if (volatility === 'HIGH') {
+            confidence -= 10; // Висока волатильність без тренду = ризик
         }
 
-        // Adjust for volatility
-        if (volatility === 'HIGH') {
-            confidence -= 10; // High volatility reduces confidence
-        } else if (volatility === 'LOW') {
-            confidence += 5; // Low volatility slightly increases confidence
-        }
+        // 5. Pattern recognition bonus
+        const priceAction = marketData.getPriceAction();
+        if (priceAction.isEngulfing) confidence += 10;
+        if (priceAction.isHammer) confidence += 5;
 
-        // Adjust for indicator divergence
-        if (indicators.hasDivergence()) {
-            confidence -= 20;
-        }
+        // 6. Penalty for divergence
+        if (indicators.hasDivergence()) confidence -= 15;
 
-        return Math.min(100, Math.max(0, confidence));
+        // 7. Time-based adjustments
+        const age = marketData.getAgeInMinutes();
+        if (age > 10) confidence -= 5; // Stale data penalty
+
+        return Math.max(0, Math.min(100, Math.round(confidence)));
     }
 
     private generateReasoning(
@@ -334,48 +505,87 @@ export class MarketAnalyzer implements IMarketAnalyzer {
         trend: 'BULLISH' | 'BEARISH' | 'SIDEWAYS',
         strength: number,
         volatility: 'LOW' | 'MEDIUM' | 'HIGH',
-        volume: 'LOW' | 'NORMAL' | 'HIGH'
+        volume: 'LOW' | 'NORMAL' | 'HIGH',
+        marketData: MarketData,
     ): string[] {
         const reasoning: string[] = [];
         const overallSignal = indicators.getOverallSignal();
+        const statistics = marketData.getStatistics();
+        const priceChange = statistics.priceChangePercent;
 
-        // Trend reasoning
-        if (trend === 'BULLISH') {
-            reasoning.push('Market shows clear bullish trend');
-        } else if (trend === 'BEARISH') {
-            reasoning.push('Market shows clear bearish trend');
+        // 1. Trend reasoning з урахуванням СИЛИ
+        if (trend === 'BEARISH') {
+            const strengthText = strength >= 8 ? 'дуже сильний' : strength >= 6 ? 'сильний' : 'помірний';
+            reasoning.push(`${strengthText} ведмежий тренд: ціна впала на ${Math.abs(priceChange).toFixed(1)}% (сила: ${strength}/10)`);
+        } else if (trend === 'BULLISH') {
+            const strengthText = strength >= 8 ? 'дуже сильний' : strength >= 6 ? 'сильний' : 'помірний';
+            reasoning.push(`${strengthText} бичачий тренд: ціна зросла на ${priceChange.toFixed(1)}% (сила: ${strength}/10)`);
         } else {
-            reasoning.push('Market is in sideways consolidation');
+            reasoning.push(`Бічний тренд: ціна коливається в діапазоні (сила сигналів: ${strength}/10)`);
         }
 
-        // Indicator reasoning
+        // 2. Technical indicators
         if (overallSignal.indicators.bullish.length > 0) {
-            reasoning.push(`Bullish indicators: ${overallSignal.indicators.bullish.join(', ')}`);
+            reasoning.push(`Бичачі індикатори: ${overallSignal.indicators.bullish.join(', ')}`);
         }
-
         if (overallSignal.indicators.bearish.length > 0) {
-            reasoning.push(`Bearish indicators: ${overallSignal.indicators.bearish.join(', ')}`);
+            reasoning.push(`Ведмежі індикатори: ${overallSignal.indicators.bearish.join(', ')}`);
         }
 
-        // Volume reasoning
+        // 3. Volume analysis
         if (volume === 'HIGH') {
-            reasoning.push('High volume confirms price movement');
+            reasoning.push(`Високий об'єм підтверджує рух ціни`);
         } else if (volume === 'LOW') {
-            reasoning.push('Low volume suggests weak conviction');
+            reasoning.push(`Низький об'єм - слабке підтвердження`);
         }
 
-        // Volatility reasoning
+        // 4. Price action
+        const currentPrice = marketData.currentPrice;
+        const ema = indicators.values.ema;
+        if (currentPrice > ema.medium) {
+            reasoning.push(`Ціна вище середнього MA (${ema.medium.toFixed(6)})`);
+        } else {
+            reasoning.push(`Ціна нижче середнього MA (${ema.medium.toFixed(6)})`);
+        }
+
+        // 5. Volatility
         if (volatility === 'HIGH') {
-            reasoning.push('High volatility indicates increased risk');
-        } else if (volatility === 'LOW') {
-            reasoning.push('Low volatility suggests stable conditions');
+            reasoning.push(`Висока волатільність - збільшений ризик і можливості`);
         }
 
-        // Strength reasoning
-        if (strength >= 8) {
-            reasoning.push('Strong signal strength provides high confidence');
-        } else if (strength <= 4) {
-            reasoning.push('Weak signal strength suggests caution');
+        // 6. Momentum
+        const adx = indicators.values.adx;
+        if (adx > 25) {
+            reasoning.push(`Сильний momentum (ADX: ${adx.toFixed(1)})`);
+        }
+
+        // 7. Pattern recognition
+        const priceAction = marketData.getPriceAction();
+        if (priceAction.isEngulfing) {
+            reasoning.push(`Виявлено поглинаючий патерн`);
+        }
+        if (priceAction.isHammer) {
+            reasoning.push(`Виявлено молоток - можливий розворот`);
+        }
+
+        // 8. ДОДАНО: Аналіз сили сигналу
+        if (strength >= 9) {
+            reasoning.push(`💪 Винятково сильний сигнал - високі шанси на успіх`);
+        } else if (strength >= 7) {
+            reasoning.push(`🔥 Сильний сигнал з добрими шансами`);
+        } else if (strength >= 5) {
+            reasoning.push(`⚡ Помірний сигнал - необхідна обережність`);
+        } else if (strength < 4) {
+            reasoning.push(`⚠️ Слабкий сигнал - високий ризик`);
+        }
+
+        // 9. Risk warnings
+        if (indicators.hasDivergence()) {
+            reasoning.push(`⚠️ Розбіжність між індикаторами`);
+        }
+
+        if (marketData.getAgeInMinutes() > 10) {
+            reasoning.push(`⚠️ Дані застарілі (${marketData.getAgeInMinutes()} хв)`);
         }
 
         return reasoning;
@@ -584,5 +794,116 @@ export class MarketAnalyzer implements IMarketAnalyzer {
             case 'VERY_HIGH':
                 return 'Very high risk, consider avoiding trades or use minimal position sizes';
         }
+    }
+
+    private calculateBaseVolumeScore(ratio: number): number {
+        if (ratio > 3.0) return 10;      // Екстремально високий
+        if (ratio > 2.5) return 9;       // Дуже високий
+        if (ratio > 2.0) return 8;       // Високий
+        if (ratio > 1.5) return 6;       // Вище норми
+        if (ratio > 1.3) return 5;       // Нормальний
+        if (ratio > 1.0) return 4;       // Трохи нижче норми
+        if (ratio > 0.7) return 3;       // Низький
+        if (ratio > 0.5) return 2;       // Дуже низький
+        return 1;                        // Екстремально низький
+    }
+
+    private analyzePriceVolumeRelationship(priceChange: number, volumeRatio: number): number {
+        const absPriceChange = Math.abs(priceChange);
+
+        // Здоровий ринок: великі цінові рухи супроводжуються високим об'ємом
+        if (absPriceChange > 5 && volumeRatio > 2.0) {
+            return 2; // Підтвердження сильного руху
+        }
+
+        // Великий ціновий рух на малому об'ємі - підозріло
+        if (absPriceChange > 3 && volumeRatio < 0.8) {
+            return -2; // Слабке підтвердження
+        }
+
+        // Високий об'єм без суттєвої зміни ціни - акумуляція/розподіл
+        if (absPriceChange < 1 && volumeRatio > 2.0) {
+            return 1; // Цікавий сигнал
+        }
+
+        // Малий рух на нормальному об'ємі
+        if (absPriceChange < 2 && volumeRatio >= 1.0 && volumeRatio <= 1.5) {
+            return 0; // Нейтрально
+        }
+
+        return 0;
+    }
+
+    private getTimeBasedVolumeAdjustment(marketData: MarketData): number {
+        const now = new Date();
+        const hour = now.getUTCHours();
+
+        // Коригування за часовими поясами (UTC)
+        // Високий об'єм під час активних торгових сесій
+
+        // Азійська сесія (00:00-08:00 UTC)
+        if (hour >= 0 && hour < 8) {
+            return 0; // Нейтрально
+        }
+
+        // Європейська сесія (08:00-16:00 UTC)
+        if (hour >= 8 && hour < 16) {
+            return 0.5; // Трохи вищий об'єм очікується
+        }
+
+        // Американська сесія (13:00-22:00 UTC) - перекриття з Європою
+        if (hour >= 13 && hour < 22) {
+            return 1; // Найвищий об'єм очікується
+        }
+
+        // Нічний час
+        return -0.5; // Нижчий об'єм природний
+    }
+
+    private analyzeVolumeTrend(marketData: MarketData, indicators: ITechnicalIndicatorValues): number {
+        // Якщо є доступ до історичних даних об'єму
+        const volumeProfile = indicators.volumeProfile;
+
+        // Простий аналіз тренду об'єму
+        // В ідеалі тут буде аналіз останніх N періодів
+
+        // Якщо поточний об'єм значно вищий за середній
+        if (volumeProfile.ratio > 2.0) {
+            // Перевіряємо чи це частина тренду зростання об'єму
+            return 0.5; // Позитивний тренд об'єму
+        }
+
+        // Якщо об'єм падає
+        if (volumeProfile.ratio < 0.8) {
+            return -0.5; // Негативний тренд об'єму
+        }
+
+        return 0;
+    }
+
+    private getVolatilityVolumeAdjustment(volatility: number, volumeRatio: number): number {
+        // Висока волатільність зазвичай супроводжується високим об'ємом
+        if (volatility > 0.05) { // Висока волатільність
+            if (volumeRatio > 1.5) {
+                return 1; // Очікувано високий об'єм
+            } else {
+                return -1; // Неочікувано низький об'єм при високій волатільності
+            }
+        }
+
+        // Низька волатільність
+        if (volatility < 0.02) {
+            if (volumeRatio > 2.0) {
+                return 1; // Неочікувано високий об'єм - можливі новини
+            }
+        }
+
+        return 0;
+    }
+
+    private determineVolumeCategory(score: number): 'LOW' | 'NORMAL' | 'HIGH' {
+        if (score >= 8) return 'HIGH';
+        if (score >= 4) return 'NORMAL';
+        return 'LOW';
     }
 }
