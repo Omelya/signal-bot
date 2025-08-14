@@ -75,7 +75,7 @@ export class AppConfig implements IAppConfig {
                 swing: parseInt(process.env.SWING_SIGNAL_COOLDOWN || '1800000'),
                 position: parseInt(process.env.POSITION_SIGNAL_COOLDOWN || '3600000')
             }
-        };
+        } as ITradingConfig;
 
         const risk: IRiskConfig = {
             maxRiskPerTrade: parseFloat(process.env.MAX_RISK_PER_TRADE || '2.0'),

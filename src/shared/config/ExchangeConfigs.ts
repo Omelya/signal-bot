@@ -30,7 +30,7 @@ export class ExchangeConfigs implements IExchangeConfigs {
                 enableRateLimit: process.env.BYBIT_ENABLE_RATE_LIMIT !== 'false',
                 baseUrl: process.env.BYBIT_BASE_URL,
                 testnet: process.env.BYBIT_TESTNET === 'true'
-            };
+            } as IExchangeApiConfig;
         }
 
         // Binance configuration
@@ -45,7 +45,7 @@ export class ExchangeConfigs implements IExchangeConfigs {
                 enableRateLimit: process.env.BINANCE_ENABLE_RATE_LIMIT !== 'false',
                 baseUrl: process.env.BINANCE_BASE_URL,
                 testnet: process.env.BINANCE_TESTNET === 'true'
-            };
+            } as IExchangeApiConfig;
         }
 
         // OKX configuration
@@ -61,7 +61,7 @@ export class ExchangeConfigs implements IExchangeConfigs {
                 enableRateLimit: process.env.OKX_ENABLE_RATE_LIMIT !== 'false',
                 baseUrl: process.env.OKX_BASE_URL,
                 testnet: process.env.OKX_TESTNET === 'true'
-            };
+            } as IExchangeApiConfig;
         }
 
         // Coinbase configuration
@@ -76,7 +76,7 @@ export class ExchangeConfigs implements IExchangeConfigs {
                 enableRateLimit: process.env.COINBASE_ENABLE_RATE_LIMIT !== 'false',
                 baseUrl: process.env.COINBASE_BASE_URL,
                 testnet: process.env.COINBASE_TESTNET === 'true'
-            };
+            } as IExchangeApiConfig;
         }
 
         return new ExchangeConfigs(
