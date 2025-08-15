@@ -23,13 +23,6 @@ export class NotificationService implements INotificationService {
 
     async sendSignalNotification(signal: Signal, message: string): Promise<INotificationResult> {
         try {
-            this.logger.debug(`Sending signal notification for signal ${signal.id}`, {
-                signalId: signal.id,
-                pair: signal.pair,
-                direction: signal.direction,
-                enabledChannels: this.getEnabledChannels()
-            });
-
             const notification: INotification = {
                 id: `signal-${signal.id}-${Date.now()}`,
                 title: `🎯 ${signal.direction} Signal - ${signal.pair}`,
@@ -46,6 +39,13 @@ export class NotificationService implements INotificationService {
                     strategy: signal.strategy
                 }
             };
+
+            this.logger.info(`Sending signal notification for signal ${signal.id}`, {
+                signalId: signal.id,
+                pair: signal.pair,
+                direction: signal.direction,
+                notification
+            });
 
             const result = await this.broadcastNotification(notification);
 
