@@ -7,6 +7,7 @@ import { ConfigurationError } from '../../shared';
 import {IPairRepository} from "../../domain/repositories/IPairRepository";
 import {TradingPair} from "../../domain/entities/TradingPair";
 import {Strategy} from "../../domain/entities/Strategy";
+import {PairSettingsTemplates} from "./PairSettingsTemplates";
 
 export interface IValidationResult {
     isValid: boolean;
@@ -519,10 +520,6 @@ export class ConfigurationService {
                     await this.pairRepository.save(tradingPair);
                 }
             }
-
-            this.logger.debug('Configurations saved to repository', {
-                tradingPairs: this.tradingPairConfigs.length
-            });
         } catch (error: any) {
             this.logger.error(`Failed to save configurations to repository: ${error.message}`);
             throw new Error(`Failed to save configurations: ${error.message}`);
@@ -540,26 +537,11 @@ export class ConfigurationService {
         const timeframe = appConfig.trading.timeframes[appConfig.trading.mode];
         const strategy = this.createDefaultStrategy(timeframe);
 
-        const settings = {
-            minVolume: 1000000,
-            volatilityMultiplier: 1.0,
-            riskAdjustment: 1.0,
-            signalStrength: appConfig.risk.minConfidenceScore,
-            spreadTolerance: 0.001,
-            signalCooldown: appConfig.trading.signalCooldowns[appConfig.trading.mode],
-            dataPoints: 100,
+        const settings = PairSettingsTemplates.generateSettings(
+            config,
             timeframe,
-            specialRules: {
-                stopLossMultiplier: 1.0,
-                takeProfitMultiplier: 1.0,
-                volumeWeight: 1.0,
-                avoidWeekends: config.category === PairCategory.TRADITIONAL,
-                newsFilter: false,
-                socialSentiment: false,
-                pumpDetection: config.category === PairCategory.MEME,
-                maxPositionTime: timeframe === TimeFrame.ONE_MINUTE ? 60 : undefined
-            }
-        } as IPairSettings;
+            appConfig,
+        );
 
         return TradingPair.create({
             symbol: config.symbol,

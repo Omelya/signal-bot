@@ -157,13 +157,16 @@ export class ConfigureBotUseCase implements IConfigureBotUseCase {
         try {
             // Check if pair already exists
             const existingPair = await this.pairRepository.findBySymbolAndExchange(config.symbol, config.exchange);
+
             if (existingPair) {
+                this.logger.error(`Trading pair ${config.symbol} already exists on ${config.exchange}`);
                 throw new DomainError(`Trading pair ${config.symbol} already exists on ${config.exchange}`);
             }
 
             // Validate the pair
             const validation = await this.configurationService.validateTradingPair(config.symbol, config.exchange);
             if (!validation.isValid) {
+                this.logger.error(`Invalid trading pair: ${validation.error}`);
                 throw new DomainError(`Invalid trading pair: ${validation.error}`);
             }
 

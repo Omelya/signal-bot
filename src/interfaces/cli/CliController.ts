@@ -115,7 +115,7 @@ export class CliController {
             .description('Add a new trading pair')
             .requiredOption('-s, --symbol <symbol>', 'Trading pair symbol (e.g., BTC/USDT)')
             .requiredOption('-e, --exchange <exchange>', 'Exchange name')
-            .option('-c, --category <category>', 'Pair category', 'crypto_major')
+            .option('-c, --category <category>', 'Pair category', '')
             .action(async (options) => {
                 await this.handlePairsAddCommand(options);
             });

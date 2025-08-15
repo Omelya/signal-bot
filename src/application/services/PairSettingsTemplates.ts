@@ -188,8 +188,8 @@ export class PairSettingsTemplates {
         timeframe: TimeFrame,
         appConfig: IAppConfig
     ): IPairSettings {
-        const pairCategory = this.detectPairCategory(config.symbol)
-        const template = this.CATEGORY_TEMPLATES[config.category];
+        const pairCategory = this.detectPairCategory(config.symbol);
+        const template = this.CATEGORY_TEMPLATES[pairCategory];
         const timeframeConfig = this.TIMEFRAME_MULTIPLIERS[timeframe];
 
         const baseSignalStrength = appConfig.risk.minConfidenceScore;
@@ -269,35 +269,35 @@ export class PairSettingsTemplates {
      * Auto-detect pair category from pair symbol
      */
     static detectPairCategory(pair: string): PairCategory {
-        const symbol = pair.toUpperCase();
+        const symbol = pair.toUpperCase().split('/').shift();
 
         // Stablecoins
         const stablecoins = ['USDT', 'USDC', 'BUSD', 'DAI', 'TUSD', 'FRAX'];
-        if (stablecoins.some(stable => symbol.includes(stable) && symbol.replace('/', '').length <= 8)) {
+        if (stablecoins.some(coin => coin === symbol)) {
             return PairCategory.STABLECOIN;
         }
 
         // Meme coins
         const memeCoins = ['DOGE', 'SHIB', 'PEPE', 'FLOKI', 'BONK', 'WIF', 'WOJAK'];
-        if (memeCoins.some(meme => symbol.includes(meme))) {
+        if (memeCoins.some(coin => coin === symbol)) {
             return PairCategory.MEME;
         }
 
         // DeFi tokens
         const defiTokens = ['UNI', 'SUSHI', 'AAVE', 'COMP', 'MKR', 'SNX', 'CRV', 'YFI', 'LINK'];
-        if (defiTokens.some(defi => symbol.includes(defi))) {
+        if (defiTokens.some(coin => coin === symbol)) {
             return PairCategory.DEFI;
         }
 
         // Major cryptos
         const majorCryptos = ['BTC', 'ETH', 'BNB', 'SOL', 'ADA', 'XRP', 'DOT', 'AVAX', 'MATIC'];
-        if (majorCryptos.some(major => symbol.includes(major))) {
+        if (majorCryptos.some(coin => coin === symbol)) {
             return PairCategory.CRYPTO_MAJOR;
         }
 
         // Traditional assets (Forex, Stocks)
         const fiatCurrencies = ['USD', 'EUR', 'GBP', 'JPY', 'CHF', 'CAD', 'AUD', 'NZD'];
-        if (fiatCurrencies.filter(fiat => symbol.includes(fiat)).length >= 2) {
+        if (fiatCurrencies.filter(coin => coin === symbol).length >= 2) {
             return PairCategory.TRADITIONAL;
         }
 
