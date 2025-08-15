@@ -8,7 +8,6 @@ import { TechnicalIndicators } from '../valueObjects/TechnicalIndicators';
 import {
     SignalDirection,
     ISignalTargets,
-    DomainError,
     SignalGenerationError,
     MarketDataError,
     ValidationUtil,
@@ -40,7 +39,7 @@ export class SignalGenerator implements ISignalGenerator {
             this.validateInputs(pair, marketData);
 
             // Analyze market if not provided
-            const marketAnalysis = analysis || await this.analyzeMarket(marketData, pair);
+            const marketAnalysis = analysis || this.analyzeMarket(marketData, pair);
 
             const shouldGenerate = await this.shouldGenerateSignal(pair, marketData, marketAnalysis);
             if (!shouldGenerate.should) {
@@ -295,9 +294,9 @@ export class SignalGenerator implements ISignalGenerator {
         }
     }
 
-    private async analyzeMarket(marketData: MarketData, pair: TradingPair): Promise<IMarketAnalysisResult> {
+    private analyzeMarket(marketData: MarketData, pair: TradingPair): IMarketAnalysisResult {
         try {
-            return await this.marketAnalyzer.analyze(marketData, pair.strategy);
+            return this.marketAnalyzer.analyze(marketData, pair.strategy);
         } catch (error: any) {
             throw new MarketDataError(`Market analysis failed: ${error.message}`);
         }
@@ -498,7 +497,7 @@ export class SignalGenerator implements ISignalGenerator {
             spread *= 0.8; // Зменшуємо спред при високому об'ємі
         }
 
-        let entryPrice = currentPrice;
+        let entryPrice;
 
         if (direction === SignalDirection.LONG) {
             // Для LONG входимо трохи вище для гарантованого виконання
