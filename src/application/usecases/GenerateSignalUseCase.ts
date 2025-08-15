@@ -25,17 +25,8 @@ export class GenerateSignalUseCase implements IGenerateSignalUseCase {
 
     async execute(marketData: MarketData, tradingPair: TradingPair): Promise<Signal | null> {
         try {
-            this.logger.info(`Generating signal for ${tradingPair.symbol} on ${marketData.exchange}`, {
-                symbol: tradingPair.symbol,
-                exchange: marketData.exchange,
-                timeframe: marketData.timeframe,
-                candleCount: marketData.candleCount
-            });
-
-            // Validate inputs
             this.validateInputs(marketData, tradingPair);
 
-            // Check if pair can generate signal (cooldown, active status, etc.)
             if (!tradingPair.canGenerateSignal()) {
                 this.logger.info(`Pair ${tradingPair.symbol} cannot generate signal`, {
                     isActive: tradingPair.isActive,
@@ -44,7 +35,6 @@ export class GenerateSignalUseCase implements IGenerateSignalUseCase {
                 return null;
             }
 
-            // Check if it's a good time to trade
             if (!tradingPair.isGoodTimeToTrade()) {
                 this.logger.info(`Not a good time to trade ${tradingPair.symbol}`, {
                     symbol: tradingPair.symbol
@@ -52,7 +42,6 @@ export class GenerateSignalUseCase implements IGenerateSignalUseCase {
                 return null;
             }
 
-            // Check if we have sufficient market data
             if (!marketData.hasSufficientData()) {
                 this.logger.warn(`Insufficient market data for ${tradingPair.symbol}`, {
                     candleCount: marketData.candleCount,
@@ -61,7 +50,6 @@ export class GenerateSignalUseCase implements IGenerateSignalUseCase {
                 return null;
             }
 
-            // Check if market data is recent
             if (!marketData.isRecent()) {
                 this.logger.warn(`Market data is stale for ${tradingPair.symbol}`, {
                     ageMinutes: marketData.getAgeInMinutes()
@@ -69,7 +57,6 @@ export class GenerateSignalUseCase implements IGenerateSignalUseCase {
                 return null;
             }
 
-            // Get adapted strategy for this pair
             const strategy = tradingPair.getAdaptedStrategy();
 
             const signal = await this

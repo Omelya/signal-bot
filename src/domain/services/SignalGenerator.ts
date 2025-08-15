@@ -29,12 +29,6 @@ export class SignalGenerator implements ISignalGenerator {
         analysis?: IMarketAnalysisResult
     ): Promise<ISignalGenerationResult> {
         try {
-            this.logger.debug(`Generating signal for ${pair.symbol}`, {
-                symbol: pair.symbol,
-                exchange: pair.exchange,
-                timeframe: pair.strategy.timeframe
-            });
-
             // Validate inputs
             this.validateInputs(pair, marketData);
 

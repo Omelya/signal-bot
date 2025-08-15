@@ -2,11 +2,12 @@ import { ConfigurationService } from '../services/ConfigurationService';
 import { IPairRepository } from '../../domain/repositories/IPairRepository';
 import { TradingPair } from '../../domain/entities/TradingPair';
 import { Strategy } from '../../domain/entities/Strategy';
-import {IEventBus, IPairSettings} from '../../shared';
+import {IEventBus} from '../../shared';
 import { ILogger } from '../../shared';
 import { DomainError } from '../../shared';
 import { PairCategory } from '../../shared';
 import { ExchangeType, TimeFrame } from '../../shared';
+import {PairSettingsTemplates} from "../services/PairSettingsTemplates";
 
 export interface ITradingPairConfig {
     symbol: string;
@@ -191,7 +192,6 @@ export class ConfigureBotUseCase implements IConfigureBotUseCase {
             });
 
             return pair;
-
         } catch (error) {
             this.logger.error(`Failed to add trading pair ${config.symbol}:`, error);
             throw error;
@@ -256,7 +256,6 @@ export class ConfigureBotUseCase implements IConfigureBotUseCase {
                 version: '1.0',
                 payload: { symbol, exchange }
             });
-
         } catch (error) {
             this.logger.error(`Failed to activate trading pair ${symbol}:`, error);
             throw error;
@@ -277,14 +276,12 @@ export class ConfigureBotUseCase implements IConfigureBotUseCase {
 
             this.logger.info(`✅ Successfully deactivated trading pair: ${symbol}`);
 
-            // Publish event
             await this.eventBus.publish({
                 type: 'config.pair.deactivated',
                 source: 'ConfigureBotUseCase',
                 version: '1.0',
                 payload: { symbol, exchange }
             });
-
         } catch (error) {
             this.logger.error(`Failed to deactivate trading pair ${symbol}:`, error);
             throw error;
@@ -604,38 +601,21 @@ export class ConfigureBotUseCase implements IConfigureBotUseCase {
     }
 
     private async createTradingPairFromConfig(config: ITradingPairConfig): Promise<TradingPair> {
-        // Parse symbol
         const [baseAsset, quoteAsset] = config.symbol.split('/');
+
         if (!baseAsset || !quoteAsset) {
             throw new DomainError(`Invalid symbol format: ${config.symbol}`);
         }
 
-        // Create strategy based on trading mode
         const appConfig = await this.configurationService.getCurrentConfiguration();
         const timeframe = appConfig.trading.timeframes[appConfig.trading.mode];
         const strategy = this.createDefaultStrategy(timeframe);
 
-        // Create default pair settings
-        const settings = {
-            minVolume: 1000000, // $1M minimum daily volume
-            volatilityMultiplier: 1.0,
-            riskAdjustment: 1.0,
-            signalStrength: appConfig.risk.minConfidenceScore,
-            spreadTolerance: 0.001, // 0.1%
-            signalCooldown: appConfig.trading.signalCooldowns[appConfig.trading.mode],
-            dataPoints: 100,
+        const settings = PairSettingsTemplates.generateSettings(
+            config,
             timeframe,
-            specialRules: {
-                stopLossMultiplier: 1.0,
-                takeProfitMultiplier: 1.0,
-                volumeWeight: 1.0,
-                avoidWeekends: config.category === PairCategory.TRADITIONAL,
-                newsFilter: false,
-                socialSentiment: false,
-                pumpDetection: config.category === PairCategory.MEME,
-                maxPositionTime: timeframe === TimeFrame.ONE_MINUTE ? 60 : undefined
-            }
-        } as IPairSettings;
+            appConfig,
+        );
 
         return TradingPair.create({
             symbol: config.symbol,
@@ -644,7 +624,7 @@ export class ConfigureBotUseCase implements IConfigureBotUseCase {
             exchange: config.exchange,
             category: config.category,
             settings,
-            strategy
+            strategy,
         });
     }
 }
