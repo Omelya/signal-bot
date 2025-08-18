@@ -173,18 +173,6 @@ export class TelegramService implements INotificationChannel {
     private async sendMessage(notification: INotification): Promise<INotificationDeliveryResult> {
         try {
             const message = this.formatMessage(notification);
-
-            // Валідуємо Markdown перед відправкою
-            if (!this.validateMarkdown(message)) {
-                this.logger.warn('Invalid markdown detected, sending without formatting');
-                // Відправляємо без parse_mode якщо є проблеми з розміткою
-                const result = await this.bot.sendMessage(this.config.chatId, message);
-                return {
-                    success: true,
-                    messageId: result.message_id.toString()
-                };
-            }
-
             const options = this.getMessageOptions(notification);
             const result = await this.bot.sendMessage(this.config.chatId, message, options);
 
@@ -192,12 +180,7 @@ export class TelegramService implements INotificationChannel {
             if (notification.priority === 'urgent' && this.config.adminChatIds.length > 0) {
                 for (const adminChatId of this.config.adminChatIds) {
                     try {
-                        const urgentMessage = `🚨 URGENT: ${message}`;
-                        if (this.validateMarkdown(urgentMessage)) {
-                            await this.bot.sendMessage(adminChatId, urgentMessage, options);
-                        } else {
-                            await this.bot.sendMessage(adminChatId, urgentMessage);
-                        }
+                        await this.bot.sendMessage(adminChatId, `🚨 URGENT: ${message}`, options);
                     } catch (error) {
                         this.logger.warn(`Failed to send urgent message to admin ${adminChatId}:`, error);
                     }
@@ -210,25 +193,8 @@ export class TelegramService implements INotificationChannel {
                 success: true,
                 messageId: result.message_id.toString()
             };
-        } catch (error: any) {
+        } catch (error) {
             this.logger.error('Failed to send Telegram message:', error);
-
-            if (error.description && error.description.includes('parse entities')) {
-                try {
-                    this.logger.info('Retrying without markdown formatting');
-                    const plainMessage = this.stripMarkdown(this.formatMessage(notification));
-                    const result = await this.bot.sendMessage(this.config.chatId, plainMessage);
-
-                    return {
-                        success: true,
-                        messageId: result.message_id.toString()
-                    };
-                } catch (retryError) {
-                    this.logger.error('Retry also failed:', retryError);
-                    return this.handleTelegramError(retryError);
-                }
-            }
-
             return this.handleTelegramError(error);
         }
     }
@@ -237,16 +203,12 @@ export class TelegramService implements INotificationChannel {
         const emoji = this.getTypeEmoji(notification.type);
         const timestamp = notification.timestamp.toLocaleString('uk-UA');
 
-        const safeTitle = this.escapeMarkdown(notification.title);
-        const safeMessage = this.escapeMarkdown(notification.message);
-
-        let message = `${emoji} *${safeTitle}*\n\n`;
-        message += `${safeMessage}\n\n`;
+        let message = `${emoji} *${notification.title}*\n\n`;
+        message += `${notification.message}\n\n`;
         message += `🕐 ${timestamp}`;
 
         if (notification.metadata?.signalId) {
-            const safeSignalId = this.escapeMarkdown(notification.metadata.signalId);
-            message += `\n📊 Signal ID: \`${safeSignalId}\``;
+            message += `\n📊 Signal ID: \`${notification.metadata.signalId}\``;
         }
 
         return message;
@@ -266,12 +228,7 @@ export class TelegramService implements INotificationChannel {
         const directionEmoji = signal.direction === 'LONG' ? '📈' : '📉';
         const confidenceStars = '⭐'.repeat(Math.min(5, Math.floor(signal.confidence / 2)));
 
-        const safePair = this.escapeMarkdown(signal.pair);
-        const safeDirection = this.escapeMarkdown(signal.direction);
-        const safeExchange = this.escapeMarkdown(signal.exchange.toUpperCase());
-        const safeStrategy = this.escapeMarkdown(signal.strategy);
-
-        let message = `${directionEmoji} *${safeDirection} ${safePair}*\n\n`;
+        let message = `${directionEmoji} *${signal.direction} ${signal.pair}*\n\n`;
         message += `💰 Entry: \`${signal.entry}\`\n`;
         message += `🛑 Stop Loss: \`${signal.stopLoss}\`\n`;
         message += `🎯 Take Profits:\n`;
@@ -281,13 +238,12 @@ export class TelegramService implements INotificationChannel {
         });
 
         message += `\n${confidenceStars} Confidence: ${signal.confidence}/10\n`;
-        message += `🏢 Exchange: ${safeExchange}\n`;
-        message += `📈 Strategy: ${safeStrategy}\n\n`;
+        message += `🏢 Exchange: ${signal.exchange.toUpperCase()}\n`;
+        message += `📈 Strategy: ${signal.strategy}\n\n`;
 
         message += `📋 *Analysis:*\n`;
         signal.reasoning.forEach((reason, index) => {
-            const safeReason = this.escapeMarkdown(reason);
-            message += `${index + 1}\\. ${safeReason}\n`;
+            message += `${index + 1}. ${reason}\n`;
         });
 
         return message;
@@ -305,14 +261,9 @@ export class TelegramService implements INotificationChannel {
         const uptimeHours = Math.floor(status.uptime / (1000 * 60 * 60));
         const uptimeMinutes = Math.floor((status.uptime % (1000 * 60 * 60)) / (1000 * 60));
 
-        const statusText = status.isRunning ? 'Running' : 'Stopped';
-        const exchangesList = status.activeExchanges.length > 0
-            ? status.activeExchanges.map(ex => this.escapeMarkdown(ex)).join(', ')
-            : 'None';
-
-        let message = `${statusEmoji} *Bot Status: ${statusText}*\n\n`;
+        let message = `${statusEmoji} *Bot Status: ${status.isRunning ? 'Running' : 'Stopped'}*\n\n`;
         message += `⏱️ Uptime: ${uptimeHours}h ${uptimeMinutes}m\n`;
-        message += `🏢 Active Exchanges: ${exchangesList}\n`;
+        message += `🏢 Active Exchanges: ${status.activeExchanges.join(', ') || 'None'}\n`;
         message += `💱 Active Pairs: ${status.activePairs.length}\n`;
         message += `📊 Signals Today: ${status.signalsToday}\n`;
         message += `📈 Success Rate: ${status.successRate.toFixed(1)}%\n`;
@@ -370,16 +321,6 @@ export class TelegramService implements INotificationChannel {
     }
 
     private handleTelegramError(error: any): INotificationDeliveryResult {
-        if (error.description && error.description.includes('parse entities')) {
-            return {
-                success: false,
-                error: new NotificationDeliveryError(
-                    'Telegram message formatting error - invalid markdown entities',
-                    'telegram'
-                )
-            };
-        }
-
         if (error.code === 429) {
             const retryAfter = error.parameters?.retry_after || 60;
             return {
@@ -405,44 +346,7 @@ export class TelegramService implements INotificationChannel {
 
         return {
             success: false,
-            error: new NotificationDeliveryError(
-                `Telegram error: ${error.description || error.message}`,
-                'telegram'
-            )
+            error: new NotificationDeliveryError(`Telegram error: ${error.description || error.message}`, 'telegram')
         };
-    }
-
-    private escapeMarkdown(text: string): string {
-        return text.replace(/[_*[\]()~`>#+=|{}.!-]/g, '\\$&');
-    }
-
-    private validateMarkdown(text: string): boolean {
-        const markdownPairs = [
-            { open: '*', close: '*' },
-            { open: '_', close: '_' },
-            { open: '`', close: '`' },
-            { open: '~', close: '~' }
-        ];
-
-        for (const pair of markdownPairs) {
-            const regex = new RegExp(`\\${pair.open}`, 'g');
-            const matches = text.match(regex);
-
-            if (matches && matches.length % 2 !== 0) {
-                this.logger.warn(`Unpaired markdown character: ${pair.open}`);
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    private stripMarkdown(text: string): string {
-        return text
-            .replace(/\*(.+?)\*/g, '$1')  // жирний текст
-            .replace(/_(.+?)_/g, '$1')    // курсив
-            .replace(/`(.+?)`/g, '$1')    // код
-            .replace(/~(.+?)~/g, '$1')    // закреслений
-            .replace(/\\/g, '');          // екрановані символи
     }
 }

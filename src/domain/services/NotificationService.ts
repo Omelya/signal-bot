@@ -465,19 +465,19 @@ export class NotificationService implements INotificationService {
         const statusIcon = status.isRunning ? '✅' : '❌';
         const uptimeFormatted = this.formatUptime(status.uptime);
 
-        let message = `${statusIcon} **Bot Status:** ${status.isRunning ? 'Running' : 'Stopped'}\n\n`;
+        let message = `${statusIcon} *Bot Status:* ${status.isRunning ? 'Running' : 'Stopped'}\n\n`;
 
         if (status.isRunning) {
-            message += `⏱️ **Uptime:** ${uptimeFormatted}\n`;
-            message += `🏢 **Active Exchanges:** ${status.activeExchanges.length > 0 ? status.activeExchanges.join(', ') : 'None'}\n`;
-            message += `💱 **Active Pairs:** ${status.activePairs.length}\n`;
-            message += `📊 **Signals Today:** ${status.signalsToday}\n`;
-            message += `📈 **Success Rate:** ${status.successRate.toFixed(1)}%\n`;
+            message += `⏱️ *Uptime:* ${uptimeFormatted}\n`;
+            message += `🏢 *Active Exchanges:* ${status.activeExchanges.length > 0 ? status.activeExchanges.join(', ') : 'None'}\n`;
+            message += `💱 *Active Pairs:* ${status.activePairs.length}\n`;
+            message += `📊 *Signals Today:* ${status.signalsToday}\n`;
+            message += `📈 *Success Rate:* ${status.successRate.toFixed(1)}%\n`;
         } else {
             message += `⚠️ Bot is currently stopped\n`;
         }
 
-        message += `\n🕐 **Status Updated:** ${new Date().toLocaleString()}`;
+        message += `\n🕐 *Status Updated:* ${new Date().toLocaleString()}`;
 
         return message;
     }

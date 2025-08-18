@@ -24,7 +24,7 @@ async function bootstrap(): Promise<void> {
         logger.info('📋 Initializing Dependency Injection Container...');
 
         // 1. Setup DI Container
-        const container = new DIContainer();
+        const container = DIContainer.initialize();
 
         // Register logger first
         container.registerInstance('logger', logger);

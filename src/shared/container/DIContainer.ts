@@ -4,6 +4,17 @@ import {ServiceDefinition, ServiceFactory, ServiceInstance, ServiceKey} from '..
 export class DIContainer {
     private services = new Map<ServiceKey, ServiceDefinition>();
     private resolving = new Set<ServiceKey>();
+    private static container: DIContainer;
+
+    public static initialize(): DIContainer {
+        if (this.container) {
+            return this.container;
+        }
+
+        this.container = new DIContainer();
+
+        return this.container;
+    }
 
     /**
      * Register a service factory

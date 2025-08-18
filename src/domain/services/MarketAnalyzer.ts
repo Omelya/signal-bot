@@ -7,6 +7,8 @@ import {PatternDetector, PatternDetectors} from "./PatternDetector";
 import {VolumeAnalyzer, VolumeLevelEnum} from "./analyzers/VolumeAnalyzer";
 import {TrendAnalyzer, TrendEnum} from "./analyzers/TrendAnalyzer";
 import {RiskAssessmentService, VolatileLevelEnum} from "./risk/RiskAssessmentService";
+import {SimpleTrendAnalyzer, SimpleTrendEnum, TrendSignal} from "./analyzers/SimpleTrendAnalyzer";
+import {SignalScore, SimpleSignalScorer} from "./analyzers/SimpleSignalScorer";
 
 export class MarketAnalyzer implements IMarketAnalyzer {
     constructor(
@@ -437,4 +439,370 @@ export class MarketAnalyzer implements IMarketAnalyzer {
 
         return patternReasoning;
     }
+
+    public analyzeSimple(marketData: MarketData, strategy?: any): ISimpleMarketAnalysisResult {
+        try {
+            this.validateMarketData(marketData);
+
+            // 1. Розрахунок тільки необхідних індикаторів (швидше в 3 рази)
+            const indicatorValues = this.calculateCoreIndicators(marketData);
+            const indicators = TechnicalIndicators.create(indicatorValues);
+
+            // 2. Простий аналіз тренду
+            const trendSignal = new SimpleTrendAnalyzer().analyzeTrend(indicators, marketData);
+
+            // 3. Аналіз об'єму (використовуємо існуючий)
+            const volume = new VolumeAnalyzer().analyzeVolume(marketData, indicatorValues);
+
+            // 4. Розрахунок балу сигналу (замінює складну логіку)
+            const signalScore = new SimpleSignalScorer().scoreSignal(
+                trendSignal,
+                indicators,
+                marketData,
+                volume
+            );
+
+            // 5. Простий ризик-аналіз
+            const riskLevel = this.assessSimpleRisk(signalScore, volume, marketData);
+
+            // 6. Логування для порівняння
+            this.logger.info(`Simple analysis completed for ${marketData.symbol}`, {
+                trend: trendSignal.direction,
+                score: signalScore.totalScore,
+                confidence: signalScore.confidence,
+                recommendation: signalScore.recommendation.action
+            });
+
+            return {
+                marketData,
+                indicators: indicatorValues,
+                trendSignal,
+                signalScore,
+                volume,
+                riskLevel,
+                recommendation: signalScore.recommendation.action,
+                confidence: signalScore.confidence,
+                reasoning: this.generateSimpleReasoning(trendSignal, signalScore)
+            };
+
+        } catch (error: any) {
+            this.logger.error(`Failed to analyze market data (simple) for ${marketData.symbol}:`, error);
+            throw new DomainError(`Simple market analysis failed: ${error.message}`);
+        }
+    }
+
+    /**
+     * НОВИЙ МЕТОД: Розрахунок тільки ключових індикаторів
+     * Замість 8 індикаторів розраховує тільки 4 необхідні
+     */
+    private calculateCoreIndicators(marketData: MarketData): ITechnicalIndicatorValues {
+        const candles = marketData.candles;
+        const closes = candles.map(c => c.close);
+        const volumes = candles.map(c => c.volume);
+
+        const settings = {
+            ema: { medium: 21 },
+            rsi: { period: 14 },
+            macd: { fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 },
+            volume: { period: 20 }
+        };
+
+        try {
+            const emaValues = this.technicalIndicatorsService.calculateEMA(closes, {
+                short: settings.ema.medium,
+                medium: settings.ema.medium,
+                long: settings.ema.medium
+            });
+
+            const rsiValue = this.technicalIndicatorsService.calculateRSI(closes, settings.rsi.period);
+            const macdValues = this.technicalIndicatorsService.calculateMACD(closes, settings.macd.fastPeriod, settings.macd.slowPeriod, settings.macd.signalPeriod);
+            const volumeProfile = this.technicalIndicatorsService.calculateVolumeProfile(volumes, settings.volume.period);
+
+            return {
+                adx: 0,
+                atr: 0,
+                bollingerBands: {
+                    lower: 0,
+                    middle: 0,
+                    upper: 0
+                },
+                stochastic: {d: 0, k: 0},
+                ema: {
+                    medium: emaValues.medium,
+                    short: emaValues.short,
+                    long: emaValues.long,
+                },
+                rsi: rsiValue,
+                macd: macdValues,
+                volumeProfile: volumeProfile
+
+            };
+
+        } catch (error: any) {
+            this.logger.error('Failed to calculate core indicators:', error);
+            throw new DomainError(`Core indicators calculation failed: ${error.message}`);
+        }
+    }
+
+    /**
+     * НОВИЙ МЕТОД: Простий ризик-аналіз
+     * Замінює складний RiskAssessmentService для базових випадків
+     */
+    private assessSimpleRisk(
+        signalScore: SignalScore,
+        volume: VolumeLevelEnum,
+        marketData: MarketData
+    ): 'LOW' | 'MEDIUM' | 'HIGH' {
+
+        let riskScore = 0;
+
+        // 1. Якість сигналу
+        if (signalScore.totalScore < 4) riskScore += 3;
+        else if (signalScore.totalScore < 6) riskScore += 1;
+        else if (signalScore.totalScore >= 8) riskScore -= 1; // Bonus
+
+        // 2. Впевненість
+        if (signalScore.confidence < 40) riskScore += 2;
+        else if (signalScore.confidence < 60) riskScore += 1;
+        else if (signalScore.confidence >= 80) riskScore -= 1; // Bonus
+
+        // 3. Об'єм
+        if (volume === VolumeLevelEnum.LOW) riskScore += 1;
+        else if (volume === VolumeLevelEnum.HIGH) riskScore -= 1; // Bonus
+
+        // 4. Свіжість даних
+        const dataAge = marketData.getAgeInMinutes();
+        if (dataAge > 15) riskScore += 2;
+        else if (dataAge > 10) riskScore += 1;
+
+        // 5. Штрафи з аналізу
+        if (signalScore.breakdown.penalties <= -1) riskScore += 1;
+
+        // Фінальна оцінка
+        if (riskScore >= 5) return 'HIGH';
+        if (riskScore >= 2) return 'MEDIUM';
+        return 'LOW';
+    }
+
+    /**
+     * НОВИЙ МЕТОД: Генерація простих пояснень
+     * Замінює складний generateReasoning()
+     */
+    private generateSimpleReasoning(
+        trendSignal: TrendSignal,
+        signalScore: SignalScore
+    ): string[] {
+        const reasoning: string[] = [];
+
+        // 1. Головний висновок
+        const directionText = signalScore.direction === 'BUY' ? 'ПОКУПКА' :
+            signalScore.direction === 'SELL' ? 'ПРОДАЖ' : 'УТРИМАННЯ';
+        reasoning.push(
+            `${directionText}: ${signalScore.strength.toLowerCase()} сигнал (${signalScore.totalScore}/10 балів)`
+        );
+
+        // 2. Основні причини тренду (топ-2)
+        reasoning.push(...trendSignal.reasons.slice(0, 2));
+
+        // 3. Розбивка балів
+        const breakdown = signalScore.breakdown;
+        reasoning.push(
+            `Розбивка: Тренд(${breakdown.trend}) + Моментум(${breakdown.momentum}) + Об'єм(${breakdown.volume}) + Тайминг(${breakdown.entry})`
+        );
+
+        // 4. Рекомендації (топ-2)
+        reasoning.push(...signalScore.recommendation.reasons.slice(0, 2));
+
+        // 5. Попередження якщо є
+        if (signalScore.breakdown.penalties < -0.5) {
+            reasoning.push(`⚠️ Увага: є негативні фактори (${Math.abs(signalScore.breakdown.penalties)} штрафних балів)`);
+        }
+
+        return reasoning.slice(0, 6); // Максимум 6 пунктів
+    }
+
+    /**
+     * НОВИЙ МЕТОД: Порівняння систем (для A/B тестування)
+     * Запускає обидві системи паралельно для порівняння
+     */
+    public compareAnalysisMethods(marketData: MarketData, strategy?: any): IAnalysisComparison {
+        const startTime = Date.now();
+
+        try {
+            // Стара система
+            const complexAnalysis = this.analyze(marketData, strategy);
+            const complexTime = Date.now() - startTime;
+
+            // Нова система
+            const simpleStartTime = Date.now();
+            const simpleAnalysis = this.analyzeSimple(marketData, strategy);
+            const simpleTime = Date.now() - simpleStartTime;
+
+            // Порівняння результатів
+            const comparison = this.generateComparison(complexAnalysis, simpleAnalysis, complexTime, simpleTime);
+
+            this.logger.info(`Analysis comparison for ${marketData.symbol}`, comparison);
+
+            return comparison;
+
+        } catch (error: any) {
+            this.logger.error(`Failed to compare analysis methods for ${marketData.symbol}:`, error);
+            throw new DomainError(`Analysis comparison failed: ${error.message}`);
+        }
+    }
+
+    /**
+     * Генерація порівняння двох методів аналізу
+     */
+    private generateComparison(
+        complex: IMarketAnalysisResult,
+        simple: ISimpleMarketAnalysisResult,
+        complexTime: number,
+        simpleTime: number
+    ): IAnalysisComparison {
+
+        return {
+            symbol: complex.marketData.symbol,
+            timestamp: new Date(),
+
+            // Результати складної системи
+            complex: {
+                recommendation: complex.recommendation,
+                confidence: complex.confidence,
+                trend: complex.trend,
+                strength: complex.strength,
+                processingTime: complexTime
+            },
+
+            // Результати простої системи
+            simple: {
+                recommendation: simple.recommendation,
+                confidence: simple.confidence,
+                trend: simple.trendSignal.direction,
+                strength: simple.signalScore.totalScore,
+                processingTime: simpleTime
+            },
+
+            // Метрики порівняння
+            metrics: {
+                speedImprovement: Math.round((complexTime / simpleTime) * 100) / 100,
+                recommendationMatch: complex.recommendation === simple.recommendation,
+                confidenceDifference: Math.abs(complex.confidence - simple.confidence),
+                trendMatch: this.compareTrends(complex.trend, simple.trendSignal.direction)
+            },
+
+            // Висновки
+            analysis: {
+                fasterMethod: simpleTime < complexTime ? 'SIMPLE' : 'COMPLEX',
+                moreConfident: complex.confidence > simple.confidence ? 'COMPLEX' : 'SIMPLE',
+                strongerSignal: complex.strength > simple.signalScore.totalScore ? 'COMPLEX' : 'SIMPLE',
+                recommendation: this.getComparisonRecommendation(complex, simple)
+            }
+        };
+    }
+
+    /**
+     * Порівняння трендів між системами
+     */
+    private compareTrends(complexTrend: TrendEnum, simpleTrend: SimpleTrendEnum): boolean {
+        const trendMapping = {
+            [TrendEnum.BULLISH]: SimpleTrendEnum.BULLISH,
+            [TrendEnum.BEARISH]: SimpleTrendEnum.BEARISH,
+            [TrendEnum.SIDEWAYS]: SimpleTrendEnum.NEUTRAL
+        };
+
+        return trendMapping[complexTrend] === simpleTrend;
+    }
+
+    /**
+     * Рекомендація яку систему використовувати
+     */
+    private getComparisonRecommendation(
+        complex: IMarketAnalysisResult,
+        simple: ISimpleMarketAnalysisResult
+    ): string {
+
+        const agreements = [];
+        const disagreements = [];
+
+        // Перевірка згоди
+        if (complex.recommendation === simple.recommendation) {
+            agreements.push('рекомендації збігаються');
+        } else {
+            disagreements.push(`рекомендації різні: ${complex.recommendation} vs ${simple.recommendation}`);
+        }
+
+        const confidenceDiff = Math.abs(complex.confidence - simple.confidence);
+        if (confidenceDiff < 10) {
+            agreements.push('впевненість подібна');
+        } else {
+            disagreements.push(`значна різниця у впевненості: ${confidenceDiff}%`);
+        }
+
+        // Фінальна рекомендація
+        if (agreements.length >= 2) {
+            return 'Системи згодні - можна використовувати просту систему';
+        } else if (disagreements.length >= 2) {
+            return 'Системи суттєво відрізняються - потрібен додатковий аналіз';
+        } else {
+            return 'Часткова згода - рекомендується додаткова перевірка';
+        }
+    }
+}
+
+export interface ISimpleMarketAnalysisResult {
+    marketData: MarketData;
+    indicators: ICoreIndicatorValues;
+    trendSignal: TrendSignal;
+    signalScore: SignalScore;
+    volume: VolumeLevelEnum;
+    riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
+    recommendation: 'STRONG_BUY' | 'BUY' | 'HOLD' | 'SELL' | 'STRONG_SELL';
+    confidence: number;
+    reasoning: string[];
+}
+
+export interface ICoreIndicatorValues {
+    ema: { medium: number };
+    rsi: number;
+    macd: {
+        line: number;
+        signal: number;
+        histogram: number;
+    };
+    volumeProfile: {
+        ratio: number;
+        sma: number;
+    };
+}
+
+export interface IAnalysisComparison {
+    symbol: string;
+    timestamp: Date;
+    complex: {
+        recommendation: string;
+        confidence: number;
+        trend: TrendEnum;
+        strength: number;
+        processingTime: number;
+    };
+    simple: {
+        recommendation: string;
+        confidence: number;
+        trend: SimpleTrendEnum;
+        strength: number;
+        processingTime: number;
+    };
+    metrics: {
+        speedImprovement: number;
+        recommendationMatch: boolean;
+        confidenceDifference: number;
+        trendMatch: boolean;
+    };
+    analysis: {
+        fasterMethod: 'SIMPLE' | 'COMPLEX';
+        moreConfident: 'SIMPLE' | 'COMPLEX';
+        strongerSignal: 'SIMPLE' | 'COMPLEX';
+        recommendation: string;
+    };
 }

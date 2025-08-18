@@ -5,6 +5,7 @@ import {VolumeLevelEnum} from "./analyzers/VolumeAnalyzer";
 import {TrendEnum} from "./analyzers/TrendAnalyzer";
 import {VolatileLevelEnum} from "./risk/RiskAssessmentService";
 import {PatternDetectors} from "./PatternDetector";
+import {ISimpleMarketAnalysisResult} from "./MarketAnalyzer";
 
 export interface IMarketAnalysisResult {
     marketData: MarketData;
@@ -22,4 +23,5 @@ export interface IMarketAnalyzer {
     analyze(marketData: MarketData, strategy?: any): IMarketAnalysisResult;
     calculateIndicators(marketData: MarketData, settings: any): ITechnicalIndicatorValues;
     detectPatterns(marketData: MarketData): PatternDetectors;
+    analyzeSimple(marketData: MarketData, strategy?: any): ISimpleMarketAnalysisResult
 }

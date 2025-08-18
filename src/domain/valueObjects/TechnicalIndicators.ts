@@ -322,8 +322,10 @@ export class TechnicalIndicators {
 
         // Validate Bollinger Bands
         const { lower, middle, upper } = this._values.bollingerBands;
-        if (lower >= middle || middle >= upper) {
-            throw new Error('Bollinger Bands must be in order: lower < middle < upper');
+        if (lower > 0 || middle > 0 || upper > 0) {
+            if (lower >= middle || middle >= upper) {
+                throw new Error('Bollinger Bands must be in order: lower < middle < upper');
+            }
         }
     }
 }
