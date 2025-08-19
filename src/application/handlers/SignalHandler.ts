@@ -78,19 +78,16 @@ export class SignalHandler extends BaseEventHandler<ISignalEventPayload> {
     }
 
     private async processSignalAtomically(signal: Signal, event: IEvent<ISignalEventPayload>): Promise<void> {
-        // Use database transaction or optimistic locking to prevent race conditions
         const maxRetries = 3;
         let retryCount = 0;
 
         while (retryCount < maxRetries) {
             try {
-                // Reload signal to get latest state
                 const currentSignal = await this.signalRepository.findById(signal.id);
                 if (!currentSignal) {
                     throw new Error(`Signal ${signal.id} not found during processing`);
                 }
 
-                // Check if signal is still in pending state
                 if (currentSignal.status !== 'PENDING') {
                     this.logger.debug(`Signal ${signal.id} is no longer pending (status: ${currentSignal.status}), skipping processing`);
                     return;
@@ -99,40 +96,32 @@ export class SignalHandler extends BaseEventHandler<ISignalEventPayload> {
                 // Process notifications
                 await this.sendSignalNotifications(currentSignal, event);
 
-                // Atomically update signal status
                 currentSignal.markAsSent();
                 await this.signalRepository.save(currentSignal);
 
-                // Log analytics
                 await this.logSignalAnalytics(currentSignal, event);
 
-                // Perform additional processing
                 await this.performAdditionalProcessing(currentSignal);
 
-                // Success - break the retry loop
                 break;
-
             } catch (error: any) {
                 retryCount++;
 
                 if (error.message.includes('version') || error.message.includes('conflict')) {
-                    // Optimistic locking conflict - retry
                     this.logger.warn(`Optimistic locking conflict for signal ${signal.id}, retry ${retryCount}/${maxRetries}`);
 
                     if (retryCount < maxRetries) {
-                        // Wait before retrying with exponential backoff
                         await this.sleep(Math.pow(2, retryCount) * 100);
                         continue;
                     }
                 }
 
-                // Log error and mark signal as failed
                 this.logger.error(`Error processing signal ${signal.id} (attempt ${retryCount}):`, error);
 
                 if (retryCount >= maxRetries) {
-                    // Mark signal as failed after max retries
                     try {
                         const failedSignal = await this.signalRepository.findById(signal.id);
+
                         if (failedSignal && failedSignal.status === 'PENDING') {
                             failedSignal.markAsFailed();
                             await this.signalRepository.save(failedSignal);
@@ -140,6 +129,7 @@ export class SignalHandler extends BaseEventHandler<ISignalEventPayload> {
                     } catch (saveError) {
                         this.logger.error(`Failed to mark signal as failed: ${saveError}`);
                     }
+
                     throw error;
                 }
             }
@@ -150,7 +140,6 @@ export class SignalHandler extends BaseEventHandler<ISignalEventPayload> {
         try {
             const message = this.formatSignalMessage(signal);
 
-            // Send to all enabled notification channels
             await this.notificationService.sendSignalNotification(signal, message);
 
             this.logger.info(`Signal notifications sent`, {
@@ -160,7 +149,7 @@ export class SignalHandler extends BaseEventHandler<ISignalEventPayload> {
             });
         } catch (error) {
             this.logger.error(`Failed to send signal notifications:`, error);
-            throw error; // Re-throw to trigger retry mechanism
+            throw error;
         }
     }
 

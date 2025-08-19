@@ -24,6 +24,7 @@ export interface ISignalRepository {
     delete(id: string): Promise<boolean>;
     count(): Promise<number>;
     clear(): Promise<void>;
+    cleanupExpiredSignals(maxAgeMinutes?: number): Promise<number>
     getStatistics(): Promise<{
         total: number;
         byStatus: Record<SignalStatus, number>;

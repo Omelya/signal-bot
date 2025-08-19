@@ -1,12 +1,6 @@
-import { Signal } from '../../domain/entities/Signal';
-import { ISignalRepository } from '../../domain/repositories/ISignalRepository';
-import {
-    ResourceNotFoundError,
-    ILogger,
-    SignalStatus,
-    SignalDirection,
-    ExchangeType
-} from '../../shared';
+import {Signal} from '../../domain/entities/Signal';
+import {ISignalRepository} from '../../domain/repositories/ISignalRepository';
+import {ExchangeType, ILogger, ResourceNotFoundError, SignalDirection, SignalStatus} from '../../shared';
 
 export class InMemorySignalRepository implements ISignalRepository {
     private signals = new Map<string, Signal>();
@@ -57,11 +51,10 @@ export class InMemorySignalRepository implements ISignalRepository {
     async findByStatus(status: SignalStatus): Promise<Signal[]> {
         try {
             const signalIds = this.indexByStatus.get(status) || new Set();
-            const signals = Array.from(signalIds)
+
+            return Array.from(signalIds)
                 .map(id => this.signals.get(id))
                 .filter((signal): signal is Signal => signal !== undefined);
-
-            return signals;
         } catch (error) {
             this.logger.error(`Failed to find signals by status ${status}:`, error);
             throw error;
@@ -71,11 +64,10 @@ export class InMemorySignalRepository implements ISignalRepository {
     async findByPair(pair: string): Promise<Signal[]> {
         try {
             const signalIds = this.indexByPair.get(pair.toUpperCase()) || new Set();
-            const signals = Array.from(signalIds)
+
+            return Array.from(signalIds)
                 .map(id => this.signals.get(id))
                 .filter((signal): signal is Signal => signal !== undefined);
-
-            return signals;
         } catch (error) {
             this.logger.error(`Failed to find signals by pair ${pair}:`, error);
             throw error;
@@ -85,11 +77,10 @@ export class InMemorySignalRepository implements ISignalRepository {
     async findByExchange(exchange: ExchangeType): Promise<Signal[]> {
         try {
             const signalIds = this.indexByExchange.get(exchange) || new Set();
-            const signals = Array.from(signalIds)
+
+            return Array.from(signalIds)
                 .map(id => this.signals.get(id))
                 .filter((signal): signal is Signal => signal !== undefined);
-
-            return signals;
         } catch (error) {
             this.logger.error(`Failed to find signals by exchange ${exchange}:`, error);
             throw error;
@@ -111,11 +102,10 @@ export class InMemorySignalRepository implements ISignalRepository {
     async findRecent(hours: number = 24): Promise<Signal[]> {
         try {
             const cutoffTime = new Date(Date.now() - hours * 60 * 60 * 1000);
-            const signals = Array.from(this.signals.values())
+
+            return Array.from(this.signals.values())
                 .filter(signal => signal.createdAt >= cutoffTime)
                 .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
-
-            return signals;
         } catch (error) {
             this.logger.error(`Failed to find recent signals (${hours}h):`, error);
             throw error;
@@ -190,7 +180,7 @@ export class InMemorySignalRepository implements ISignalRepository {
                 throw new ResourceNotFoundError(`Signal ${signal.id} not found`);
             }
 
-            await this.save(signal); // save() handles the update logic
+            await this.save(signal);
         } catch (error) {
             this.logger.error(`Failed to update signal ${signal.id}:`, error);
             throw error;
@@ -350,5 +340,24 @@ export class InMemorySignalRepository implements ISignalRepository {
         if (exchangeSet) {
             exchangeSet.delete(signal.id);
         }
+    }
+
+    async cleanupExpiredSignals(maxAgeMinutes: number = 60): Promise<number> {
+        const allActive = await this.findByStatus(SignalStatus.PENDING)
+            .then(pending => this.findByStatus(SignalStatus.SENT)
+                .then(sent => [...pending, ...sent]));
+
+        const expired = allActive.filter(signal => signal.isExpired(maxAgeMinutes));
+
+        for (const signal of expired) {
+            if (signal.status === SignalStatus.SENT) {
+                signal.markAsExecuted();
+            }
+
+            await this.update(signal);
+        }
+
+        this.logger.info(`Cleaned up ${expired.length} expired signals`);
+        return expired.length;
     }
 }

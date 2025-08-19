@@ -94,7 +94,7 @@ export class Strategy implements IStrategy {
                 riskRewardRatio: 2.5
             },
             minSignalStrength: 6,
-            maxSimultaneousSignals: 5
+            maxSimultaneousSignals: 6
         });
     }
 

@@ -270,28 +270,24 @@ export class NotificationService implements INotificationService {
         const failedChannels: string[] = [];
         const errors: Record<string, Error> = {};
 
-        // Send to all channels in parallel
         const deliveryPromises = enabledChannels.map(async (channel) => {
             try {
                 const result = await this.sendToChannel(channel, notification);
 
                 if (result.success) {
                     deliveredChannels.push(channel.name);
-                    this.logger.debug(`✅ Notification delivered to ${channel.name}`, {
-                        messageId: result.messageId,
-                        notificationId: notification.id
-                    });
                 } else {
                     failedChannels.push(channel.name);
+
                     if (result.error) {
                         errors[channel.name] = result.error;
                     }
+
                     this.logger.warn(`❌ Notification failed for ${channel.name}`, {
                         error: result.error?.message,
                         notificationId: notification.id
                     });
                 }
-
             } catch (error) {
                 failedChannels.push(channel.name);
                 errors[channel.name] = error as Error;
@@ -299,7 +295,6 @@ export class NotificationService implements INotificationService {
             }
         });
 
-        // Wait for all deliveries to complete
         await Promise.allSettled(deliveryPromises);
 
         const success = deliveredChannels.length > 0;
@@ -330,22 +325,20 @@ export class NotificationService implements INotificationService {
                     if (attempt > 1) {
                         this.logger.info(`✅ Notification delivered to ${channel.name} after ${attempt} attempts`);
                     }
+
                     return result;
                 }
 
                 lastError = result.error;
 
-                // Don't retry for certain error types
                 if (lastError && this.shouldNotRetry(lastError)) {
                     break;
                 }
 
                 if (attempt <= maxRetries) {
                     const delay = this.calculateRetryDelay(attempt, result.retryAfter);
-                    this.logger.debug(`Retrying notification to ${channel.name} in ${delay}ms (attempt ${attempt + 1}/${maxRetries + 1})`);
                     await this.sleep(delay);
                 }
-
             } catch (error) {
                 lastError = error as Error;
 
@@ -355,7 +348,6 @@ export class NotificationService implements INotificationService {
 
                 if (attempt <= maxRetries) {
                     const delay = this.calculateRetryDelay(attempt);
-                    this.logger.debug(`Retrying notification to ${channel.name} in ${delay}ms due to error (attempt ${attempt + 1}/${maxRetries + 1})`);
                     await this.sleep(delay);
                 }
             }

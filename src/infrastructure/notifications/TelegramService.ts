@@ -203,13 +203,9 @@ export class TelegramService implements INotificationChannel {
         const emoji = this.getTypeEmoji(notification.type);
         const timestamp = notification.timestamp.toLocaleString('uk-UA');
 
-        let message = `${emoji} *${notification.title}*\n\n`;
+        let message = `${emoji} <b>${notification.title}</b>\n\n`;
         message += `${notification.message}\n\n`;
         message += `🕐 ${timestamp}`;
-
-        if (notification.metadata?.signalId) {
-            message += `\n📊 Signal ID: \`${notification.metadata.signalId}\``;
-        }
 
         return message;
     }
@@ -273,11 +269,10 @@ export class TelegramService implements INotificationChannel {
 
     private getMessageOptions(notification: INotification): any {
         const options: any = {
-            parse_mode: 'Markdown',
+            parse_mode: 'HTML',
             disable_web_page_preview: true
         };
 
-        // Add inline keyboard for signal notifications
         if (notification.metadata?.signalId) {
             options.reply_markup = {
                 inline_keyboard: [[
@@ -297,6 +292,7 @@ export class TelegramService implements INotificationChannel {
             'warning': '⚠️',
             'error': '❌'
         };
+
         return emojiMap[type] || 'ℹ️';
     }
 
