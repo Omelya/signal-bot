@@ -16,22 +16,13 @@ export class InMemorySignalRepository implements ISignalRepository {
         try {
             const existingSignal = this.signals.get(signal.id);
 
-            // Remove from old indexes if updating
             if (existingSignal) {
                 this.removeFromIndexes(existingSignal);
             }
 
-            // Save signal
             this.signals.set(signal.id, signal);
 
-            // Add to indexes
             this.addToIndexes(signal);
-
-            this.logger.debug(`Signal ${signal.id} saved to in-memory repository`, {
-                signalId: signal.id,
-                pair: signal.pair,
-                status: signal.status
-            });
         } catch (error) {
             this.logger.error(`Failed to save signal ${signal.id}:`, error);
             throw error;
@@ -282,7 +273,6 @@ export class InMemorySignalRepository implements ISignalRepository {
         }
     }
 
-    // Private methods
     private initializeIndexes(): void {
         this.indexByStatus.clear();
         this.indexByPair.clear();
@@ -298,45 +288,49 @@ export class InMemorySignalRepository implements ISignalRepository {
     }
 
     private addToIndexes(signal: Signal): void {
-        // Add to status index
         const statusSet = this.indexByStatus.get(signal.status);
+
         if (statusSet) {
             statusSet.add(signal.id);
         }
 
-        // Add to pair index
         const pairKey = signal.pair.toUpperCase();
+
         if (!this.indexByPair.has(pairKey)) {
             this.indexByPair.set(pairKey, new Set());
         }
+
         this.indexByPair.get(pairKey)!.add(signal.id);
 
-        // Add to exchange index
         const exchangeSet = this.indexByExchange.get(signal.exchange);
+
         if (exchangeSet) {
             exchangeSet.add(signal.id);
         }
     }
 
     private removeFromIndexes(signal: Signal): void {
-        // Remove from status index
-        const statusSet = this.indexByStatus.get(signal.status);
-        if (statusSet) {
-            statusSet.delete(signal.id);
-        }
+        Object.values(SignalStatus).forEach(status => {
+            const statusSet = this.indexByStatus.get(status);
 
-        // Remove from pair index
+            if (statusSet) {
+                statusSet.delete(signal.id);
+            }
+        });
+
         const pairKey = signal.pair.toUpperCase();
         const pairSet = this.indexByPair.get(pairKey);
+
         if (pairSet) {
             pairSet.delete(signal.id);
+
             if (pairSet.size === 0) {
                 this.indexByPair.delete(pairKey);
             }
         }
 
-        // Remove from exchange index
         const exchangeSet = this.indexByExchange.get(signal.exchange);
+
         if (exchangeSet) {
             exchangeSet.delete(signal.id);
         }
