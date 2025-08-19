@@ -11,7 +11,6 @@ import { BotOrchestrator } from './application/services/BotOrchestrator';
  * Bootstrap function to initialize the application
  */
 async function bootstrap(): Promise<void> {
-    // Create basic logger first
     const logger = new WinstonLogger({
         level: process.env.LOG_LEVEL || 'info',
         file: process.env.LOG_FILE || 'logs/bot.log',
@@ -43,7 +42,6 @@ async function bootstrap(): Promise<void> {
         // 4. Start CLI
         const cli = container.get<CliController>('cliController');
         await cli.run(process.argv);
-
     } catch (error) {
         logger.error('💥 Fatal error during bootstrap:', error);
         process.exit(1);
@@ -56,7 +54,7 @@ async function bootstrap(): Promise<void> {
 function setupGlobalErrorHandling(logger: ILogger): void {
     process.on('unhandledRejection', (reason: unknown, promise: Promise<unknown>) => {
         logger.error('🚨 Unhandled Rejection:', { reason, promise });
-        // In production, you might want to exit the process
+
         if (process.env.NODE_ENV === 'production') {
             process.exit(1);
         }
@@ -83,7 +81,6 @@ function setupGracefulShutdown(container: DIContainer, logger: ILogger): void {
             logger.info(`🛑 Received ${signal}, initiating graceful shutdown...`);
 
             try {
-                // Get bot orchestrator and stop it gracefully
                 const botOrchestrator = container.get<BotOrchestrator>('botOrchestrator');
                 if (botOrchestrator && typeof botOrchestrator.stop === 'function') {
                     await botOrchestrator.stop();
