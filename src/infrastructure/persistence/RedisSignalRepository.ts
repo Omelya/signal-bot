@@ -509,4 +509,8 @@ export class RedisSignalRepository implements ISignalRepository {
     private getDirectionIndexKey(direction: SignalDirection): string {
         return `${this.keyPrefix}idx:direction:${direction}`;
     }
+
+    cleanupExpiredSignals(maxAgeMinutes?: number): Promise<number> {
+        return Promise.resolve(0);
+    }
 }
