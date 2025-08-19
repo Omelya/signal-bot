@@ -42,8 +42,7 @@ export class InMemorySignalRepository implements ISignalRepository {
     async findByStatus(status: SignalStatus): Promise<Signal[]> {
         try {
             const signalIds = this.indexByStatus.get(status) || new Set();
-console.log(status)
-            console.log(signalIds)
+
             return Array.from(signalIds)
                 .map(id => this.signals.get(id))
                 .filter((signal): signal is Signal => signal !== undefined);
@@ -337,7 +336,7 @@ console.log(status)
         }
     }
 
-    async cleanupExpiredSignals(maxAgeMinutes: number = 1): Promise<number> {
+    async cleanupExpiredSignals(maxAgeMinutes: number = 60): Promise<number> {
         const allActive = await this.findByStatus(SignalStatus.PENDING)
             .then(pending => this.findByStatus(SignalStatus.SENT)
                 .then(sent => [...pending, ...sent]));
