@@ -27,6 +27,7 @@ export class GenerateSignalUseCase implements IGenerateSignalUseCase {
     async execute(marketData: MarketData, tradingPair: TradingPair): Promise<Signal | null> {
         try {
             this.validateInputs(marketData, tradingPair);
+            await this.signalRepository.cleanupExpiredSignals();
 
             if (!tradingPair.canGenerateSignal()) {
                 this.logger.info(`Pair ${tradingPair.symbol} cannot generate signal`, {
@@ -106,7 +107,6 @@ export class GenerateSignalUseCase implements IGenerateSignalUseCase {
             signalItem.markAsSent();
 
             await this.signalRepository.save(signalItem);
-            await this.signalRepository.cleanupExpiredSignals();
 
             this.logger.info(`Signal generated successfully for ${tradingPair.symbol}`, {
                 signalId: signalItem.id,
