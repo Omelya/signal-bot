@@ -55,6 +55,7 @@ export class GenerateSignalUseCase implements IGenerateSignalUseCase {
                 this.logger.warn(`Market data is stale for ${tradingPair.symbol}`, {
                     ageMinutes: marketData.getAgeInMinutes()
                 });
+
                 return null;
             }
 
@@ -70,6 +71,7 @@ export class GenerateSignalUseCase implements IGenerateSignalUseCase {
                     symbol: tradingPair.symbol,
                     currentPrice: marketData.currentPrice
                 });
+
                 return null;
             }
 
@@ -78,6 +80,7 @@ export class GenerateSignalUseCase implements IGenerateSignalUseCase {
                     confidence: signal.confidence,
                     required: strategy.minSignalStrength
                 });
+
                 return null;
             }
 
@@ -87,6 +90,7 @@ export class GenerateSignalUseCase implements IGenerateSignalUseCase {
                     active: activeSignals.length,
                     max: strategy.maxSimultaneousSignals,
                 });
+
                 return null;
             }
 
@@ -96,12 +100,13 @@ export class GenerateSignalUseCase implements IGenerateSignalUseCase {
 
             tradingPair.updateLastSignalTime();
 
-            await this.sendSignalNotification(signalItem, tradingPair);
-
+            await this.sendSignalNotification(signalItem);
             await this.publishSignalEvent(signalItem);
 
             signalItem.markAsSent();
+
             await this.signalRepository.save(signalItem);
+            await this.signalRepository.cleanupExpiredSignals();
 
             this.logger.info(`Signal generated successfully for ${tradingPair.symbol}`, {
                 signalId: signalItem.id,
@@ -189,7 +194,7 @@ export class GenerateSignalUseCase implements IGenerateSignalUseCase {
         }
     }
 
-    private async sendSignalNotification(signal: Signal, tradingPair: TradingPair): Promise<void> {
+    private async sendSignalNotification(signal: Signal): Promise<void> {
         try {
             const message = this.formatSignalNotification(signal);
             await this.notificationService.sendSignalNotification(signal, message);
@@ -202,20 +207,20 @@ export class GenerateSignalUseCase implements IGenerateSignalUseCase {
         const riskReward = signal.calculateRiskReward();
         const strength = signal.getStrength();
 
-        return `🎯 *${signal.direction} Signal Generated*\n\n` +
-            `📊 *Pair:* ${signal.pair}\n` +
-            `🏢 *Exchange:* ${signal.exchange.toUpperCase()}\n` +
-            `💰 *Entry:* ${signal.entry.value} ${signal.entry.currency}\n` +
-            `🎲 *Confidence:* ${signal.confidence}/10 (${strength})\n` +
-            `⚖️ *Risk\/Reward:* 1:${riskReward}\n` +
-            `📈 *Strategy:* ${signal.strategy}\n` +
-            `⏰ *Timeframe:* ${signal.timeframe}\n\n` +
-            `🎯 *Take Profits:*\n` +
+        return `🎯 <b>${signal.direction} Signal Generated</b>\n\n` +
+            `📊 <b>Pair:</b> ${signal.pair}\n` +
+            `🏢 <b>Exchange:</b> ${signal.exchange.toUpperCase()}\n` +
+            `💰 <b>Entry:</b> ${signal.entry.value} ${signal.entry.currency}\n` +
+            `🎲 <b>Confidence:</b> ${signal.confidence}/10 (${strength})\n` +
+            `⚖️ <b>Risk/Reward:</b> 1:${riskReward}\n` +
+            `📈 <b>Strategy:</b> ${signal.strategy}\n` +
+            `⏰ <b>Timeframe:</b> ${signal.timeframe}\n\n` +
+            `🎯 <b>Take Profits:</b>\n` +
             signal.targets.takeProfits.map((tp, i) => `   TP${i + 1}: ${tp}`).join('\n') + '\n' +
-            `🛑 *Stop Loss:* ${signal.targets.stopLoss}\n\n` +
-            `📝 *Analysis:*\n` +
+            `🛑 <b>Stop Loss:</b> ${signal.targets.stopLoss}\n\n` +
+            `📝 <b>Analysis:</b>\n` +
             signal.reasoning.map(reason => `• ${reason}`).join('\n') + '\n\n' +
-            `🔗 *Signal ID:* \`${signal.id}\``;
+            `🔗 <b>Signal ID:</b> <code>${signal.id}</code>`;
     }
 
     private async publishSignalEvent(signal: Signal): Promise<void> {
