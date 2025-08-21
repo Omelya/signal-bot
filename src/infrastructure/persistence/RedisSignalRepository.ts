@@ -513,4 +513,8 @@ export class RedisSignalRepository implements ISignalRepository {
     cleanupExpiredSignals(maxAgeMinutes?: number): Promise<number> {
         return Promise.resolve(0);
     }
+
+    findActiveByPair(pair: string): Promise<Signal | null> {
+        return Promise.resolve(null);
+    }
 }

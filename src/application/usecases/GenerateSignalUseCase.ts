@@ -85,17 +85,14 @@ export class GenerateSignalUseCase implements IGenerateSignalUseCase {
                 return null;
             }
 
-            const activeSignals = await this.signalRepository.findActive();
-            if (activeSignals.length >= strategy.maxSimultaneousSignals) {
-                this.logger.warn(`Max simultaneous signals reached`, {
-                    active: activeSignals.length,
-                    max: strategy.maxSimultaneousSignals,
-                });
+            const signalItem = signal.signal;
+
+            const activePairSignal = await this.signalRepository.findActiveByPair(signalItem.pair);
+            if (activePairSignal) {
+                this.logger.warn(`Max simultaneous signals reached for ${tradingPair.symbol}`);
 
                 return null;
             }
-
-            const signalItem = signal.signal;
 
             await this.signalRepository.save(signalItem);
 

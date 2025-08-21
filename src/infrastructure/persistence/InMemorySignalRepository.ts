@@ -65,6 +65,28 @@ export class InMemorySignalRepository implements ISignalRepository {
         }
     }
 
+    async findActiveByPair(pair: string): Promise<Signal|null> {
+        try {
+            const signalIds = this.indexByPair.get(pair.toUpperCase()) || new Set();
+
+            const sortedActiveSignals = Array
+                .from(signalIds)
+                .map(id => this.signals.get(id))
+                .filter(
+                    (signal): signal is Signal => {
+                        return signal !== undefined
+                            && signal.status === SignalStatus.SENT;
+                    }
+                )
+                .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+
+            return sortedActiveSignals[0] || null;
+        } catch (error) {
+            this.logger.error(`Failed to find signals by pair ${pair}:`, error);
+            throw error;
+        }
+    }
+
     async findByExchange(exchange: ExchangeType): Promise<Signal[]> {
         try {
             const signalIds = this.indexByExchange.get(exchange) || new Set();

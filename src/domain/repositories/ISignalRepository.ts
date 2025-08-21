@@ -6,6 +6,7 @@ export interface ISignalRepository {
     findById(id: string): Promise<Signal | null>;
     findByStatus(status: SignalStatus): Promise<Signal[]>;
     findByPair(pair: string): Promise<Signal[]>;
+    findActiveByPair(pair: string): Promise<Signal|null>;
     findByExchange(exchange: ExchangeType): Promise<Signal[]>;
     findActive(): Promise<Signal[]>;
     findRecent(hours?: number): Promise<Signal[]>;
