@@ -195,7 +195,7 @@ export class ServiceProvider {
             );
         }, {
             dependencies: [
-                'signalGenerator',
+                'simpleSignalGenerator',
                 'signalRepository',
                 'notificationService',
                 'eventBus',
