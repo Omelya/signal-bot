@@ -444,17 +444,13 @@ export class MarketAnalyzer implements IMarketAnalyzer {
         try {
             this.validateMarketData(marketData);
 
-            // 1. Розрахунок тільки необхідних індикаторів (швидше в 3 рази)
             const indicatorValues = this.calculateCoreIndicators(marketData);
             const indicators = TechnicalIndicators.create(indicatorValues);
 
-            // 2. Простий аналіз тренду
             const trendSignal = new SimpleTrendAnalyzer().analyzeTrend(indicators, marketData);
 
-            // 3. Аналіз об'єму (використовуємо існуючий)
             const volume = new VolumeAnalyzer().analyzeVolume(marketData, indicatorValues);
 
-            // 4. Розрахунок балу сигналу (замінює складну логіку)
             const signalScore = new SimpleSignalScorer().scoreSignal(
                 trendSignal,
                 indicators,
@@ -462,15 +458,13 @@ export class MarketAnalyzer implements IMarketAnalyzer {
                 volume
             );
 
-            // 5. Простий ризик-аналіз
             const riskLevel = this.assessSimpleRisk(signalScore, volume, marketData);
 
-            // 6. Логування для порівняння
             this.logger.info(`Simple analysis completed for ${marketData.symbol}`, {
                 trend: trendSignal.direction,
                 score: signalScore.totalScore,
                 confidence: signalScore.confidence,
-                recommendation: signalScore.recommendation.action
+                recommendation: signalScore.recommendation.action,
             });
 
             return {
@@ -482,19 +476,14 @@ export class MarketAnalyzer implements IMarketAnalyzer {
                 riskLevel,
                 recommendation: signalScore.recommendation.action,
                 confidence: signalScore.confidence,
-                reasoning: this.generateSimpleReasoning(trendSignal, signalScore)
+                reasoning: this.generateSimpleReasoning(trendSignal, signalScore),
             };
-
         } catch (error: any) {
             this.logger.error(`Failed to analyze market data (simple) for ${marketData.symbol}:`, error);
             throw new DomainError(`Simple market analysis failed: ${error.message}`);
         }
     }
 
-    /**
-     * НОВИЙ МЕТОД: Розрахунок тільки ключових індикаторів
-     * Замість 8 індикаторів розраховує тільки 4 необхідні
-     */
     private calculateCoreIndicators(marketData: MarketData): ITechnicalIndicatorValues {
         const candles = marketData.candles;
         const closes = candles.map(c => c.close);
@@ -534,20 +523,14 @@ export class MarketAnalyzer implements IMarketAnalyzer {
                 },
                 rsi: rsiValue,
                 macd: macdValues,
-                volumeProfile: volumeProfile
-
+                volumeProfile: volumeProfile,
             };
-
         } catch (error: any) {
             this.logger.error('Failed to calculate core indicators:', error);
             throw new DomainError(`Core indicators calculation failed: ${error.message}`);
         }
     }
 
-    /**
-     * НОВИЙ МЕТОД: Простий ризик-аналіз
-     * Замінює складний RiskAssessmentService для базових випадків
-     */
     private assessSimpleRisk(
         signalScore: SignalScore,
         volume: VolumeLevelEnum,
@@ -556,69 +539,60 @@ export class MarketAnalyzer implements IMarketAnalyzer {
 
         let riskScore = 0;
 
-        // 1. Якість сигналу
         if (signalScore.totalScore < 4) riskScore += 3;
         else if (signalScore.totalScore < 6) riskScore += 1;
-        else if (signalScore.totalScore >= 8) riskScore -= 1; // Bonus
+        else if (signalScore.totalScore >= 8) riskScore -= 1;
 
-        // 2. Впевненість
         if (signalScore.confidence < 40) riskScore += 2;
         else if (signalScore.confidence < 60) riskScore += 1;
-        else if (signalScore.confidence >= 80) riskScore -= 1; // Bonus
+        else if (signalScore.confidence >= 80) riskScore -= 1;
 
-        // 3. Об'єм
         if (volume === VolumeLevelEnum.LOW) riskScore += 1;
-        else if (volume === VolumeLevelEnum.HIGH) riskScore -= 1; // Bonus
+        else if (volume === VolumeLevelEnum.HIGH) riskScore -= 1;
 
-        // 4. Свіжість даних
         const dataAge = marketData.getAgeInMinutes();
         if (dataAge > 15) riskScore += 2;
         else if (dataAge > 10) riskScore += 1;
 
-        // 5. Штрафи з аналізу
         if (signalScore.breakdown.penalties <= -1) riskScore += 1;
 
-        // Фінальна оцінка
         if (riskScore >= 5) return 'HIGH';
         if (riskScore >= 2) return 'MEDIUM';
         return 'LOW';
     }
 
-    /**
-     * НОВИЙ МЕТОД: Генерація простих пояснень
-     * Замінює складний generateReasoning()
-     */
     private generateSimpleReasoning(
         trendSignal: TrendSignal,
         signalScore: SignalScore
     ): string[] {
         const reasoning: string[] = [];
 
-        // 1. Головний висновок
-        const directionText = signalScore.direction === 'BUY' ? 'ПОКУПКА' :
-            signalScore.direction === 'SELL' ? 'ПРОДАЖ' : 'УТРИМАННЯ';
+        const signalDirection = signalScore.direction === 'SELL'
+            ? 'ПРОДАЖ'
+            : 'УТРИМАННЯ';
+
+        const directionText = signalScore.direction === 'BUY'
+            ? 'ПОКУПКА'
+            : signalDirection;
+
         reasoning.push(
             `${directionText}: ${signalScore.strength.toLowerCase()} сигнал (${signalScore.totalScore}/10 балів)`
         );
 
-        // 2. Основні причини тренду (топ-2)
         reasoning.push(...trendSignal.reasons.slice(0, 2));
 
-        // 3. Розбивка балів
         const breakdown = signalScore.breakdown;
         reasoning.push(
             `Розбивка: Тренд(${breakdown.trend}) + Моментум(${breakdown.momentum}) + Об'єм(${breakdown.volume}) + Тайминг(${breakdown.entry})`
         );
 
-        // 4. Рекомендації (топ-2)
         reasoning.push(...signalScore.recommendation.reasons.slice(0, 2));
 
-        // 5. Попередження якщо є
         if (signalScore.breakdown.penalties < -0.5) {
             reasoning.push(`⚠️ Увага: є негативні фактори (${Math.abs(signalScore.breakdown.penalties)} штрафних балів)`);
         }
 
-        return reasoning.slice(0, 6); // Максимум 6 пунктів
+        return reasoning.slice(0, 6);
     }
 
     /**
