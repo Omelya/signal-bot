@@ -139,15 +139,6 @@ export class ServiceProvider {
             return new MarketAnalyzer(technicalIndicators, logger);
         }, { dependencies: ['technicalIndicatorsService', 'logger'] });
 
-        // Signal generator
-        container.register('signalGenerator', (c) => {
-            const SignalGenerator = require('../../domain/services/SignalGenerator').SignalGenerator;
-            const marketAnalyzer = c.get('marketAnalyzer');
-            const signalRepository = c.get('signalRepository');
-            const logger = c.get('logger');
-            return new SignalGenerator(marketAnalyzer, signalRepository, logger);
-        }, { dependencies: ['marketAnalyzer', 'logger'] });
-
         // Simple signal generator
         container.register('simpleSignalGenerator', (c) => {
             const SimpleSignalGenerator = require('../../domain/services/SimpleSignalGenerator').SimpleSignalGenerator;
@@ -190,7 +181,7 @@ export class ServiceProvider {
         // Use cases
         container.register('generateSignalUseCase', (c) => {
             const GenerateSignalUseCase = require('../../application/usecases/GenerateSignalUseCase').GenerateSignalUseCase;
-            const signalGenerator = c.get('signalGenerator');
+            const signalGenerator = c.get('simpleSignalGenerator');
             const signalRepository = c.get('signalRepository');
             const notificationService = c.get('notificationService');
             const eventBus = c.get('eventBus');
@@ -204,7 +195,7 @@ export class ServiceProvider {
             );
         }, {
             dependencies: [
-                'signalGenerator',
+                'simpleSignalGenerator',
                 'signalRepository',
                 'notificationService',
                 'eventBus',

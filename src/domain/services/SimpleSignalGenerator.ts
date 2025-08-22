@@ -4,42 +4,23 @@ import { MarketData } from '../entities/MarketData';
 import { Price } from '../valueObjects/Price';
 import {ISimpleMarketAnalysisResult, MarketAnalyzer} from './MarketAnalyzer';
 import { SignalDirection, ISignalTargets, ILogger, PairCategory } from '../../shared';
+import {ISignalGenerator, SimpleSignalResult} from "./ISignalGenerator";
 
-export type SimpleSignalResult = {
-    signal?: Signal;
-    shouldGenerate: boolean;
-    reason: string;
-    confidence: number;
-    metadata: {
-        processingTime: number;
-        analysisScore: number;
-        riskLevel: string;
-        volume: string;
-    };
-}
-
-export class SimpleSignalGenerator {
-
+export class SimpleSignalGenerator implements ISignalGenerator {
     constructor(
         private readonly marketAnalyzer: MarketAnalyzer,
         private readonly logger: ILogger
     ) {}
 
-    /**
-     * Головний метод генерації сигналу
-     * Замінює складний generateSignal() з вашого SignalGenerator
-     */
     public async generateSignal(
         pair: TradingPair,
         marketData: MarketData,
         analysis?: ISimpleMarketAnalysisResult
     ): Promise<SimpleSignalResult> {
-
         const startTime = Date.now();
         const marketAnalysis = this.marketAnalyzer.analyzeSimple(marketData, pair.strategy)
 
         try {
-            // 1. Швидкий фільтр - тільки 4 критичні перевірки
             const shouldGenerate = this.shouldGenerateSignal(marketAnalysis, pair);
             if (!shouldGenerate.should) {
                 return {
@@ -55,11 +36,9 @@ export class SimpleSignalGenerator {
                 };
             }
 
-            // 2. Створення сигналу
-            const signal = await this.createSimpleSignal(pair, marketData, marketAnalysis);
+            const signal = await this.createSignal(pair, marketData, marketAnalysis);
+            const validation = this.validateSignal(signal, marketAnalysis);
 
-            // 3. Базова валідація (тільки критичні перевірки)
-            const validation = this.validateSimpleSignal(signal, marketAnalysis);
             if (!validation.valid) {
                 return {
                     shouldGenerate: false,
@@ -93,7 +72,6 @@ export class SimpleSignalGenerator {
                     volume: marketAnalysis.volume
                 }
             };
-
         } catch (error: any) {
             this.logger.error(`Failed to generate simple signal for ${pair.symbol}:`, error);
 
@@ -111,21 +89,14 @@ export class SimpleSignalGenerator {
         }
     }
 
-    /**
-     * Спрощений фільтр генерації сигналу
-     * Замінює складний shouldGenerateSignal() з 7+ умовами
-     */
     private shouldGenerateSignal(
         analysis: ISimpleMarketAnalysisResult,
         pair: TradingPair
     ): { should: boolean; reason: string } {
-
-        // 1. Базова активність пари
         if (!pair.isActive) {
             return { should: false, reason: 'Trading pair is inactive' };
         }
 
-        // 2. Cooldown period (якщо є)
         if (!pair.canGenerateSignal()) {
             return {
                 should: false,
@@ -133,7 +104,6 @@ export class SimpleSignalGenerator {
             };
         }
 
-        // 3. Мінімальна якість сигналу
         const minScore = this.getMinScore(pair.category);
         if (analysis.signalScore.totalScore < minScore) {
             return {
@@ -142,7 +112,6 @@ export class SimpleSignalGenerator {
             };
         }
 
-        // 4. Мінімальна впевненість
         const minConfidence = this.getMinConfidence(pair.category, analysis.riskLevel);
         if (analysis.confidence < minConfidence) {
             return {
@@ -151,7 +120,6 @@ export class SimpleSignalGenerator {
             };
         }
 
-        // 5. Не генеруємо HOLD сигнали
         if (analysis.recommendation === 'HOLD') {
             return {
                 should: false,
@@ -159,7 +127,6 @@ export class SimpleSignalGenerator {
             };
         }
 
-        // 6. Свіжість даних
         if (!analysis.marketData.isRecent(15)) {
             return {
                 should: false,
@@ -170,14 +137,11 @@ export class SimpleSignalGenerator {
         return { should: true, reason: 'All conditions met' };
     }
 
-    /**
-     * Адаптивні мінімальні пороги для різних категорій
-     */
     private getMinScore(category: PairCategory): number {
         switch (category) {
-            case PairCategory.CRYPTO_MAJOR: return 4.5; // BTC, ETH - менший ризик
-            case PairCategory.CRYPTO_ALT: return 5.0;   // Стандартний поріг
-            case PairCategory.MEME: return 6.0;         // MEME - вищий ризик
+            case PairCategory.CRYPTO_MAJOR: return 4.5;
+            case PairCategory.CRYPTO_ALT: return 5.0;
+            case PairCategory.MEME: return 6.0;
             default: return 5.0;
         }
     }
@@ -185,13 +149,11 @@ export class SimpleSignalGenerator {
     private getMinConfidence(category: PairCategory, riskLevel: string): number {
         let baseConfidence = 45;
 
-        // Коригування за категорією
         switch (category) {
             case PairCategory.CRYPTO_MAJOR: baseConfidence = 40; break;
             case PairCategory.MEME: baseConfidence = 55; break;
         }
 
-        // Коригування за ризиком
         switch (riskLevel) {
             case 'HIGH': baseConfidence += 15; break;
             case 'MEDIUM': baseConfidence += 5; break;
@@ -201,11 +163,7 @@ export class SimpleSignalGenerator {
         return Math.max(30, Math.min(80, baseConfidence));
     }
 
-    /**
-     * Створення простого сигналу
-     * Замінює складний createSignal() з багатьма розрахунками
-     */
-    private async createSimpleSignal(
+    private async createSignal(
         pair: TradingPair,
         marketData: MarketData,
         analysis: ISimpleMarketAnalysisResult
@@ -454,25 +412,18 @@ export class SimpleSignalGenerator {
         return reasoning.slice(0, 5); // Максимум 5 причин
     }
 
-    /**
-     * Спрощена валідація сигналу
-     * Тільки критичні перевірки замість 10+ правил
-     */
-    private validateSimpleSignal(
+    validateSignal(
         signal: Signal,
         analysis: ISimpleMarketAnalysisResult
     ): { valid: boolean; reason: string } {
-
-        // 1. Risk/Reward ratio - найважливіша перевірка
         const riskReward = signal.calculateRiskReward();
-        if (riskReward < 1.0) { // Знизили поріг з 1.2 до 1.0
+        if (riskReward < 1.0) {
             return {
                 valid: false,
                 reason: `Risk/reward too low: ${riskReward.toFixed(2)} (min: 1.0)`
             };
         }
 
-        // 2. Мінімальна впевненість сигналу
         if (signal.confidence < 2) {
             return {
                 valid: false,
@@ -480,7 +431,6 @@ export class SimpleSignalGenerator {
             };
         }
 
-        // 3. Потенційна втрата не занадто висока
         const potentialLoss = signal.getPotentialLoss();
         const maxLoss = analysis.riskLevel === 'HIGH' ? 2.5 :
             analysis.riskLevel === 'MEDIUM' ? 3.0 : 3.5;
@@ -492,7 +442,6 @@ export class SimpleSignalGenerator {
             };
         }
 
-        // 4. Логічність цілей (базова перевірка)
         const entryPrice = signal.entry.value;
         const stopLoss = signal.targets.stopLoss;
         const firstTP = signal.targets.takeProfits[0] as number;
@@ -516,9 +465,6 @@ export class SimpleSignalGenerator {
         return { valid: true, reason: 'Signal validation passed' };
     }
 
-    /**
-     * Швидка перевірка чи можна генерувати сигнал (без детального аналізу)
-     */
     public canGenerateSignal(pair: TradingPair, marketData: MarketData): boolean {
         try {
             return pair.isActive &&

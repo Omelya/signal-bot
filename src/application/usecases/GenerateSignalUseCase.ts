@@ -4,11 +4,10 @@ import { INotificationService } from '../../domain/services/INotificationService
 import { Signal } from '../../domain/entities/Signal';
 import { MarketData } from '../../domain/entities/MarketData';
 import { TradingPair } from '../../domain/entities/TradingPair';
-import {DIContainer, IEventBus} from '../../shared';
+import {IEventBus} from '../../shared';
 import { ILogger } from '../../shared';
 import { DomainError } from '../../shared';
 import { ISignalEventPayload } from '../../shared';
-import {SimpleSignalGenerator} from "../../domain/services/SimpleSignalGenerator";
 
 export interface IGenerateSignalUseCase {
     execute(marketData: MarketData, tradingPair: TradingPair): Promise<Signal | null>;
@@ -21,80 +20,91 @@ export class GenerateSignalUseCase implements IGenerateSignalUseCase {
         private readonly signalRepository: ISignalRepository,
         private readonly notificationService: INotificationService,
         private readonly eventBus: IEventBus,
-        private readonly logger: ILogger
+        private readonly logger: ILogger,
     ) {}
 
     async execute(marketData: MarketData, tradingPair: TradingPair): Promise<Signal | null> {
         try {
             this.validateInputs(marketData, tradingPair);
+            await this.signalRepository.cleanupExpiredSignals();
 
             if (!tradingPair.canGenerateSignal()) {
                 this.logger.info(`Pair ${tradingPair.symbol} cannot generate signal`, {
                     isActive: tradingPair.isActive,
-                    cooldownRemaining: tradingPair.getRemainingCooldown()
+                    cooldownRemaining: tradingPair.getRemainingCooldown(),
                 });
+
                 return null;
             }
 
             if (!tradingPair.isGoodTimeToTrade()) {
-                this.logger.info(`Not a good time to trade ${tradingPair.symbol}`, {
-                    symbol: tradingPair.symbol
-                });
+                this.logger.info(
+                    `Not a good time to trade ${tradingPair.symbol}`,
+                    {symbol: tradingPair.symbol},
+                );
+
                 return null;
             }
 
             if (!marketData.hasSufficientData()) {
-                this.logger.warn(`Insufficient market data for ${tradingPair.symbol}`, {
-                    candleCount: marketData.candleCount,
-                    required: 50
-                });
+                this.logger.warn(
+                    `Insufficient market data for ${tradingPair.symbol}`,
+                    {
+                        candleCount: marketData.candleCount,
+                        required: 50,
+                    },
+                );
+
                 return null;
             }
 
             if (!marketData.isRecent()) {
-                this.logger.warn(`Market data is stale for ${tradingPair.symbol}`, {
-                    ageMinutes: marketData.getAgeInMinutes()
-                });
+                this.logger.warn(
+                    `Market data is stale for ${tradingPair.symbol}`,
+                    {ageMinutes: marketData.getAgeInMinutes()},
+                );
 
                 return null;
             }
 
             const strategy = tradingPair.getAdaptedStrategy();
 
-            const simpleSignalGenerator = DIContainer.initialize().get('simpleSignalGenerator') as SimpleSignalGenerator;
-
-            const signal = await simpleSignalGenerator
+            const signal = await this
+                .signalGenerator
                 .generateSignal(tradingPair, marketData);
 
             if (!signal.signal) {
-                this.logger.info(`No signal generated for ${tradingPair.symbol}`, {
-                    symbol: tradingPair.symbol,
-                    currentPrice: marketData.currentPrice
-                });
+                this.logger.info(
+                    `No signal generated for ${tradingPair.symbol}`,
+                    {
+                        symbol: tradingPair.symbol,
+                        currentPrice: marketData.currentPrice,
+                    },
+                );
 
                 return null;
             }
 
             if (signal.confidence < strategy.minSignalStrength) {
-                this.logger.info(`Signal confidence too low for ${tradingPair.symbol}`, {
-                    confidence: signal.confidence,
-                    required: strategy.minSignalStrength
-                });
-
-                return null;
-            }
-
-            const activeSignals = await this.signalRepository.findActive();
-            if (activeSignals.length >= strategy.maxSimultaneousSignals) {
-                this.logger.warn(`Max simultaneous signals reached`, {
-                    active: activeSignals.length,
-                    max: strategy.maxSimultaneousSignals,
-                });
+                this.logger.info(
+                    `Signal confidence too low for ${tradingPair.symbol}`,
+                    {
+                        confidence: signal.confidence,
+                        required: strategy.minSignalStrength,
+                    },
+                );
 
                 return null;
             }
 
             const signalItem = signal.signal;
+
+            const activePairSignal = await this.signalRepository.findActiveByPair(signalItem.pair);
+            if (activePairSignal) {
+                this.logger.warn(`Max simultaneous signals reached for ${tradingPair.symbol}`);
+
+                return null;
+            }
 
             await this.signalRepository.save(signalItem);
 
@@ -106,14 +116,13 @@ export class GenerateSignalUseCase implements IGenerateSignalUseCase {
             signalItem.markAsSent();
 
             await this.signalRepository.save(signalItem);
-            await this.signalRepository.cleanupExpiredSignals();
 
             this.logger.info(`Signal generated successfully for ${tradingPair.symbol}`, {
                 signalId: signalItem.id,
                 direction: signalItem.direction,
                 confidence: signalItem.confidence,
                 entry: signalItem.entry.value,
-                riskReward: signalItem.calculateRiskReward()
+                riskReward: signalItem.calculateRiskReward(),
             });
 
             return signalItem;
@@ -127,8 +136,8 @@ export class GenerateSignalUseCase implements IGenerateSignalUseCase {
                 payload: {
                     pair: tradingPair.symbol,
                     exchange: marketData.exchange,
-                    error: error.message
-                }
+                    error: error.message,
+                },
             });
 
             throw error;
@@ -156,7 +165,6 @@ export class GenerateSignalUseCase implements IGenerateSignalUseCase {
 
         this.logger.info(`Generated ${signals.length} signals from ${marketDataList.length} pairs`);
 
-        // Publish batch completion event
         await this.eventBus.publish({
             type: 'signal.batch.completed',
             source: 'GenerateSignalUseCase',
