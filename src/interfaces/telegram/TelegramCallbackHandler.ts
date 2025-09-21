@@ -310,12 +310,12 @@ export class TelegramCallbackHandler extends AbstractTelegramHandler {
                         ],
                         [
                             {
-                                text: 'STBL/USDT',
-                                callback_data: TelegramCallbackDataEnum.CHOOSE_TRADING_PAIR + 'STBL/USDT',
+                                text: 'OP/USDT',
+                                callback_data: TelegramCallbackDataEnum.CHOOSE_TRADING_PAIR + 'OP/USDT',
                             },
                             {
-                                text: 'MATIC/USDT',
-                                callback_data: TelegramCallbackDataEnum.CHOOSE_TRADING_PAIR + 'MATIC/USDT',
+                                text: 'POL/USDT',
+                                callback_data: TelegramCallbackDataEnum.CHOOSE_TRADING_PAIR + 'POL/USDT',
                             },
                             {
                                 text: 'AAVE/USDT',
