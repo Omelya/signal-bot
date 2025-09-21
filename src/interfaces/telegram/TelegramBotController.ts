@@ -52,12 +52,21 @@ export class TelegramBotController {
 
         try {
             this.bot.clearTextListeners();
+
+            await new Promise(resolve => setTimeout(resolve, 1000));
+
             await this.bot.stopPolling();
             await this.bot.close();
 
             this.isRunning = false;
             this.logger.info('Telegram bot stopped successfully');
         } catch (error: any) {
+            if (error.message.includes('429') || error.message.includes('Too Many Requests')) {
+                this.logger.warn('Rate limit during stop - bot stopped anyway');
+                this.isRunning = false;
+                return;
+            }
+
             this.logger.error(`Error stopping bot: ${error.message}`);
         }
     }
@@ -71,6 +80,14 @@ export class TelegramBotController {
             } catch (error: any) {
                 this.logger.error(`Starting telegram bot error: ${error.message}`, msg);
             }
+        });
+
+        bot.on('polling_error', (error) => {
+           this.logger.error('Polling error:', error);
+        });
+
+        bot.on('error', (error) => {
+            this.logger.error('Bot error:', error);
         });
     }
 
@@ -149,7 +166,19 @@ export class TelegramBotController {
             this.attempt++
             this.logger.info(`Telegram bot connection, attempt ${this.attempt}`);
 
-            this.bot = new TelegramBot(botToken, {polling: polling});
+            this.bot = new TelegramBot(
+                botToken,
+                {
+                    polling: polling,
+                    request: {
+                        url: '',
+                        agentOptions: {
+                            keepAlive: true,
+                            family: 4
+                        }
+                    }
+                },
+            );
 
             const me = await this.bot.getMe();
 
