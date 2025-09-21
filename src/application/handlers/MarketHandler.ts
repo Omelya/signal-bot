@@ -1,36 +1,33 @@
 import {BaseEventHandler} from "../services/EventBus";
-import {IEvent, ILogger} from "../../shared";
+import {EventTypes, IEvent, ILogger, IMarketDataEventPayload} from "../../shared";
+import {IPairRepository} from "../../domain/repositories/IPairRepository";
+import {IGenerateSignalUseCase} from "../usecases/GenerateSignalUseCase";
 
 /**
  * Handler for market data update events
  */
 export class MarketDataHandler extends BaseEventHandler {
-    eventType = 'market.data.updated';
+    eventType = EventTypes.MARKET_DATA_UPDATED;
 
     constructor(
-        private readonly logger: ILogger
+        private readonly pairRepository: IPairRepository,
+        private readonly generateSignalUseCase: IGenerateSignalUseCase,
+        private readonly logger: ILogger,
     ) {
         super();
     }
 
-    async handle(event: IEvent<any>): Promise<void> {
+    async handle(event: IEvent<IMarketDataEventPayload>): Promise<void> {
         try {
-            const { symbol, exchange, price, volume, timestamp } = event.payload;
+            const { marketData, pair } = event.payload;
 
-            this.logger.debug(`Market data updated`, {
-                symbol,
-                exchange,
-                price,
-                volume,
-                timestamp
-            });
+            const signal = await this.generateSignalUseCase.execute(marketData, pair);
 
-            // Additional market data processing could be done here:
-            // - Update price caches
-            // - Trigger technical analysis
-            // - Check for significant price movements
-            // - Update volatility calculations
+            if (signal) {
+                pair.markSignalAsSuccessful();
 
+                await this.pairRepository.update(pair);
+            }
         } catch (error) {
             this.logger.error('Error handling market data event:', error);
         }

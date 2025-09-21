@@ -17,6 +17,7 @@ export class TradingPair {
     validationResult?: IPairValidationResult;
 
     private constructor(
+        readonly id: string,
         readonly symbol: string,
         readonly baseAsset: string,
         readonly quoteAsset: string,
@@ -35,6 +36,7 @@ export class TradingPair {
      */
     static create(params: ITradingPairCreateParams): TradingPair {
         return new TradingPair(
+            params.id ?? '',
             params.symbol.toUpperCase(),
             params.baseAsset.toUpperCase(),
             params.quoteAsset.toUpperCase(),
@@ -69,6 +71,7 @@ export class TradingPair {
         }
 
         const pair = new TradingPair(
+            '',
             data.symbol,
             data.baseAsset,
             data.quoteAsset,

@@ -99,6 +99,7 @@ export interface ITelegramConfig {
     readonly enabled: boolean;
     readonly botToken: string;
     readonly chatId: string;
+    readonly polling: boolean;
     readonly enableNotifications: boolean;
     readonly enableCommands: boolean;
     readonly adminChatIds: string[];

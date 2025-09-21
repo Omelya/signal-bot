@@ -120,11 +120,12 @@ export class AppConfig implements IAppConfig {
             enabled: Boolean(process.env.TELEGRAM_BOT_TOKEN),
             botToken: process.env.TELEGRAM_BOT_TOKEN || '',
             chatId: process.env.TELEGRAM_CHAT_ID || '',
+            polling: process.env.TELEGRAM_POLLING === 'true' || false,
             enableNotifications: process.env.TELEGRAM_ENABLE_NOTIFICATIONS !== 'false',
             enableCommands: process.env.TELEGRAM_ENABLE_COMMANDS !== 'false',
             adminChatIds: (process.env.TELEGRAM_ADMIN_CHAT_IDS || '').split(',').filter(Boolean),
             rateLimitPerMinute: parseInt(process.env.TELEGRAM_RATE_LIMIT_PER_MINUTE || '20')
-        };
+        } as ITelegramConfig;
 
         const webhook: IWebhookConfig = {
             enabled: process.env.WEBHOOK_ENABLED === 'true',

@@ -7,19 +7,21 @@ import {
     ITelegramConfig,
     NotificationDeliveryError,
     AuthenticationError,
-    RateLimitError,
+    RateLimitError, ISignalMetadata,
 } from '../../shared';
+import {UserTradingPairRepository} from "../persistence/UserTradingPairRepository";
 
 export class TelegramService implements INotificationChannel {
     public readonly name = 'telegram';
     private bot!: TelegramBot;
     private lastMessageTime = 0;
-    private messageQueue: Array<{ notification: INotification; resolve: Function; reject: Function }> = [];
+    private messageQueue: Array<{ notification: INotification; resolve: Function; reject: Function, chatId?: number,  }> = [];
     private isProcessingQueue = false;
 
     constructor(
+        private readonly userTradingPairRepository: UserTradingPairRepository,
         private readonly config: ITelegramConfig,
-        private readonly logger: ILogger
+        private readonly logger: ILogger,
     ) {
         if (this.config.enabled && this.config.botToken) {
             this.initializeBot();
@@ -54,6 +56,7 @@ export class TelegramService implements INotificationChannel {
                 id: 'test-' + Date.now(),
                 title: 'Test Message',
                 message: 'This is a test message from Universal Signal Bot',
+                category: 'system',
                 type: 'info',
                 priority: 'normal',
                 timestamp: new Date()
@@ -68,31 +71,66 @@ export class TelegramService implements INotificationChannel {
     }
 
     // Telegram-specific methods
-    async sendSignalNotification(signal: {
-        id: string;
-        pair: string;
-        direction: string;
-        entry: number;
-        stopLoss: number;
-        takeProfits: number[];
-        confidence: number;
-        reasoning: string[];
-        exchange: string;
-        strategy: string;
-    }): Promise<INotificationDeliveryResult> {
-        const message = this.formatSignalMessage(signal);
+    async sendSignalNotification(notification: INotification<ISignalMetadata>): Promise<INotificationDeliveryResult> {
+        if (!this.isEnabled()) {
+            return {
+                success: false,
+                error: new Error('Telegram service is not enabled or configured')
+            };
+        }
 
-        const notification: INotification = {
-            id: `signal-${signal.id}`,
-            title: `🚨 ${signal.direction} Signal - ${signal.pair}`,
-            message,
-            type: 'info',
-            priority: 'high',
-            timestamp: new Date(),
-            metadata: { signalId: signal.id, pair: signal.pair }
-        };
+        const tradingPairWithUser = await this
+            .userTradingPairRepository
+            .findActiveTradingPairWithUser(notification.metadata!.pair);
 
-        return this.send(notification);
+        if (tradingPairWithUser.length === 0) {
+            return {
+                success: false,
+                error: new Error('No users found for this trading pair')
+            };
+        }
+
+        return new Promise((resolve, reject) => {
+            let completedCount = 0;
+            let hasError = false;
+            let lastError: Error | undefined;
+
+            tradingPairWithUser.forEach(item => {
+                this.messageQueue.push({
+                    notification,
+                    resolve: (result: INotificationDeliveryResult) => {
+                        completedCount++;
+
+                        if (!result.success && !hasError) {
+                            hasError = true;
+                            lastError = result.error;
+                        }
+
+                        if (completedCount === tradingPairWithUser.length) {
+                            if (hasError) {
+                                resolve({
+                                    success: false,
+                                    error: lastError as Error,
+                                });
+                            } else {
+                                resolve({
+                                    success: true
+                                });
+                            }
+                        }
+                    },
+                    reject: (error: Error) => {
+                        if (!hasError) {
+                            hasError = true;
+                            reject(error);
+                        }
+                    },
+                    chatId: item.user!.telegram_user_id,
+                });
+            });
+
+            this.processQueue();
+        });
     }
 
     async sendAlert(title: string, message: string, priority: 'low' | 'normal' | 'high' | 'urgent' = 'normal'): Promise<INotificationDeliveryResult> {
@@ -102,6 +140,7 @@ export class TelegramService implements INotificationChannel {
             id: 'alert-' + Date.now(),
             title: `${emoji} ${title}`,
             message,
+            category: 'system',
             type: priority === 'urgent' ? 'error' : priority === 'high' ? 'warning' : 'info',
             priority,
             timestamp: new Date()
@@ -110,25 +149,7 @@ export class TelegramService implements INotificationChannel {
         return this.send(notification);
     }
 
-    async sendBotStatus(status: {
-        isRunning: boolean;
-        activeExchanges: string[];
-        activePairs: string[];
-        uptime: number;
-        signalsToday: number;
-        successRate: number;
-    }): Promise<INotificationDeliveryResult> {
-        const message = this.formatStatusMessage(status);
-
-        const notification: INotification = {
-            id: 'status-' + Date.now(),
-            title: `🤖 Bot Status Update`,
-            message,
-            type: status.isRunning ? 'success' : 'warning',
-            priority: 'normal',
-            timestamp: new Date()
-        };
-
+    async sendBotStatus(notification: INotification): Promise<INotificationDeliveryResult> {
         return this.send(notification);
     }
 
@@ -151,12 +172,12 @@ export class TelegramService implements INotificationChannel {
         this.isProcessingQueue = true;
 
         while (this.messageQueue.length > 0) {
-            const { notification, resolve, reject } = this.messageQueue.shift()!;
+            const { chatId, notification, resolve, reject } = this.messageQueue.shift()!;
 
             try {
                 await this.respectRateLimit();
 
-                const result = await this.sendMessage(notification);
+                const result = await this.sendMessage(notification, chatId);
                 resolve(result);
             } catch (error) {
                 const result: INotificationDeliveryResult = {
@@ -170,11 +191,11 @@ export class TelegramService implements INotificationChannel {
         this.isProcessingQueue = false;
     }
 
-    private async sendMessage(notification: INotification): Promise<INotificationDeliveryResult> {
+    private async sendMessage(notification: INotification, chatId?: number): Promise<INotificationDeliveryResult> {
         try {
             const message = this.formatMessage(notification);
             const options = this.getMessageOptions(notification);
-            const result = await this.bot.sendMessage(this.config.chatId, message, options);
+            const result = await this.bot.sendMessage(chatId ?? this.config.chatId, message, options);
 
             // Send to admin chats if urgent
             if (notification.priority === 'urgent' && this.config.adminChatIds.length > 0) {

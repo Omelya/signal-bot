@@ -42,7 +42,7 @@ export class Strategy implements IStrategy {
             params.risk,
             params.minSignalStrength,
             params.maxSimultaneousSignals,
-            strategyType
+            strategyType,
         );
     }
 

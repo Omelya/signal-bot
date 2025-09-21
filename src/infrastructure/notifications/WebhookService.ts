@@ -22,6 +22,10 @@ export class WebhookService implements INotificationChannel {
         this.initializeHttpClient();
     }
 
+    sendSignalNotification(notification: INotification<any>): Promise<INotificationDeliveryResult> {
+        throw new Error("Method not implemented.");
+    }
+
     isEnabled(): boolean {
         return this.config.enabled && this.config.urls.length > 0;
     }
@@ -82,6 +86,7 @@ export class WebhookService implements INotificationChannel {
                 title: 'Test Webhook',
                 message: 'This is a test webhook from Universal Signal Bot',
                 type: 'info',
+                category: 'system',
                 priority: 'normal',
                 timestamp: new Date()
             };

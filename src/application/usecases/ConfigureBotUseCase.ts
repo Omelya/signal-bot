@@ -106,27 +106,11 @@ export class ConfigureBotUseCase implements IConfigureBotUseCase {
 
         try {
             // Get trading pairs from configuration
-            const pairConfigs = await this.configurationService.getTradingPairConfigurations();
+            const pairs = await this.pairRepository.findActive();
 
-            if (pairConfigs.length === 0) {
+            if (pairs.length === 0) {
                 this.logger.warn('No trading pairs configured, creating default pairs');
-                await this.createDefaultTradingPairs();
                 return await this.loadTradingPairs();
-            }
-
-            const pairs: TradingPair[] = [];
-
-            for (const config of pairConfigs) {
-                try {
-                    const pair = await this.createTradingPairFromConfig(config);
-                    await this.pairRepository.save(pair);
-                    pairs.push(pair);
-
-                    this.logger.debug(`Loaded trading pair: ${pair.symbol} on ${pair.exchange}`);
-
-                } catch (error) {
-                    this.logger.error(`Failed to load trading pair ${config.symbol}:`, error);
-                }
             }
 
             this.logger.info(`✅ Loaded ${pairs.length} trading pairs`);
@@ -144,7 +128,6 @@ export class ConfigureBotUseCase implements IConfigureBotUseCase {
             });
 
             return pairs;
-
         } catch (error) {
             this.logger.error('Failed to load trading pairs:', error);
             throw error;
@@ -213,7 +196,7 @@ export class ConfigureBotUseCase implements IConfigureBotUseCase {
             // Deactivate first if active
             if (pair.isActive) {
                 pair.deactivate();
-                await this.pairRepository.save(pair);
+                await this.pairRepository.update(pair);
             }
 
             // Remove from repository
@@ -248,7 +231,7 @@ export class ConfigureBotUseCase implements IConfigureBotUseCase {
             }
 
             pair.activate();
-            await this.pairRepository.save(pair);
+            await this.pairRepository.update(pair);
 
             this.logger.info(`✅ Successfully activated trading pair: ${symbol}`);
 
@@ -275,7 +258,7 @@ export class ConfigureBotUseCase implements IConfigureBotUseCase {
             }
 
             pair.deactivate();
-            await this.pairRepository.save(pair);
+            await this.pairRepository.update(pair);
 
             this.logger.info(`✅ Successfully deactivated trading pair: ${symbol}`);
 
@@ -302,7 +285,7 @@ export class ConfigureBotUseCase implements IConfigureBotUseCase {
 
             // Update pair settings (this would require extending the TradingPair entity)
             // For now, we'll just log the operation
-            await this.pairRepository.save(pair);
+            await this.pairRepository.update(pair);
 
             this.logger.info(`✅ Successfully updated settings for trading pair: ${symbol}`);
 
@@ -567,40 +550,6 @@ export class ConfigureBotUseCase implements IConfigureBotUseCase {
         }
 
         return { errors, warnings };
-    }
-
-    private async createDefaultTradingPairs(): Promise<void> {
-        this.logger.info('Creating default trading pairs...');
-
-        const defaultConfigs: ITradingPairConfig[] = [
-            {
-                symbol: 'BTC/USDT',
-                exchange: ExchangeType.BYBIT,
-                category: PairCategory.CRYPTO_MAJOR,
-                isActive: true
-            },
-            {
-                symbol: 'ETH/USDT',
-                exchange: ExchangeType.BYBIT,
-                category: PairCategory.CRYPTO_MAJOR,
-                isActive: true
-            },
-            {
-                symbol: 'BNB/USDT',
-                exchange: ExchangeType.BINANCE,
-                category: PairCategory.CRYPTO_MAJOR,
-                isActive: false
-            }
-        ];
-
-        for (const config of defaultConfigs) {
-            try {
-                await this.configurationService.addTradingPairConfiguration(config);
-                this.logger.debug(`Created default pair: ${config.symbol} on ${config.exchange}`);
-            } catch (error) {
-                this.logger.warn(`Failed to create default pair ${config.symbol}:`, error);
-            }
-        }
     }
 
     private async createTradingPairFromConfig(config: ITradingPairConfig): Promise<TradingPair> {

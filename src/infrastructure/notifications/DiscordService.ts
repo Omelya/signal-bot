@@ -6,6 +6,8 @@ import {
     INotification,
     INotificationDeliveryResult,
 } from '../../shared';
+import {response} from "express";
+import {error} from "winston";
 
 export interface IDiscordConfig {
     enabled: boolean;
@@ -66,6 +68,7 @@ export class DiscordService implements INotificationChannel {
                 id: 'test-' + Date.now(),
                 title: 'Test Discord Notification',
                 message: 'This is a test message from Universal Signal Bot',
+                category: 'system',
                 type: 'info',
                 priority: 'normal',
                 timestamp: new Date()
@@ -124,5 +127,9 @@ export class DiscordService implements INotificationChannel {
             'error': 15158332     // Red
         };
         return colorMap[type] || 3447003;
+    }
+
+    sendSignalNotification(notification: INotification): Promise<INotificationDeliveryResult> {
+        return Promise.resolve({success: false});
     }
 }

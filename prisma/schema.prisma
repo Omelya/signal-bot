@@ -1,0 +1,247 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                    BigInt   @id @default(autoincrement())
+  telegram_username     String
+  telegram_user_id      BigInt   @unique(map: "users_telegram_user_id_unique")
+  risk_tolerance        Decimal  @default(5) @db.Decimal(3, 1)
+  min_confidence        Int      @default(70)
+  notifications_enabled Boolean  @default(false)
+  created_at            DateTime @default(now()) @db.Timestamp(0)
+  updated_at            DateTime @updatedAt @db.Timestamp(0)
+
+  user_trading_pair UserTradingPair[]
+
+  @@index([telegram_user_id], map: "users_telegram_user_id_index")
+  @@map("users")
+}
+
+model Exchange {
+  id                   String   @id @default(uuid()) @db.Uuid
+  type                 String   @unique
+  name                 String   @unique
+  api_key              String // Will be encrypted
+  secret_key           String // Will be encrypted
+  passphrase           String? // For OKX
+  sandbox              Boolean  @default(true)
+  timeout              Int      @default(30000)
+  rate_limit_remaining Int      @default(1200)
+  supported_timeframes String[]
+  max_candle_history   Int
+  rate_limits          Json // IRateLimit
+  supportedOrderTypes  String[]
+  supports_futures     Boolean  @default(true)
+  supports_margin      Boolean  @default(true)
+  supports_spot        Boolean  @default(true)
+  min_order_size       Float
+  max_order_size       Float
+  trading_fees         Json // ITradingFees
+  created_at           DateTime @default(now())
+  updated_at           DateTime @updatedAt
+
+  trading_pairs TradingPair[]
+  signals       Signal[]
+  markets       Market[]
+
+  @@index([name], map: "exchanges_name_index")
+  @@index([type], map: "exchanges_type_index")
+  @@map("exchanges")
+}
+
+model Market {
+  id             String   @id @default(uuid()) @db.Uuid
+  exchange_id    String   @db.Uuid
+  symbol         String
+  base_asset     String
+  quote_asset    String
+  is_active      Boolean  @default(true)
+  min_order_size Float
+  max_order_size Float
+  tick_size      Float
+  step_size      Float
+  last_price     Float?
+  bid            Float?
+  ask            Float?
+  volume_24h     Float?
+  change_24h     Float?
+  last_update    DateTime @default(now())
+  created_at     DateTime @default(now())
+
+  exchange Exchange @relation(fields: [exchange_id], references: [id], onDelete: Cascade)
+
+  @@unique([exchange_id, symbol])
+  @@index([exchange_id], map: "markets_name_index")
+  @@index([symbol], map: "markets_type_index")
+  @@index([is_active], map: "markets_is_active_index")
+  @@map("markets")
+}
+
+model Strategy {
+  id                       String   @id @default(uuid()) @db.Uuid
+  name                     String   @unique
+  description              String
+  type                     String
+  timeframe                String
+  indicators               Json // IIndicatorSettings
+  risk_management          Json // IRiskManagement
+  signal_conditions        Json? // ISignalConditions
+  min_signal_strength      Int      @default(6)
+  max_simultaneous_signals Int      @default(5)
+  is_active                Boolean  @default(true)
+  created_at               DateTime @default(now())
+  updated_at               DateTime @updatedAt
+
+  trading_pairs TradingPair[]
+  signals       Signal[]
+
+  @@index([name], map: "strategies_name_index")
+  @@index([is_active], map: "strategies_is_active_index")
+  @@map("strategies")
+}
+
+model TradingPair {
+  id                      String   @id @default(uuid()) @db.Uuid
+  symbol                  String
+  base_asset              String
+  quote_asset             String
+  exchange_id             String   @db.Uuid
+  strategy_id             String   @db.Uuid
+  category                String
+  settings                Json // IPairSettings
+  is_active               Boolean  @default(true)
+  last_signal_time        BigInt   @default(0)
+  total_signals_generated Int      @default(0)
+  successful_signals      Int      @default(0)
+  last_validation_time    BigInt   @default(0)
+  validation_result       Json? // IPairValidationResult
+  created_at              DateTime @default(now())
+  updated_at              DateTime @updatedAt
+
+  exchange           Exchange          @relation(fields: [exchange_id], references: [id], onDelete: Cascade)
+  strategy           Strategy          @relation(fields: [strategy_id], references: [id], onDelete: Cascade)
+  signals            Signal[]
+  user_trading_pairs UserTradingPair[]
+
+  @@unique([symbol, exchange_id])
+  @@index([symbol], map: "trading_pairs_symbol_index")
+  @@index([exchange_id], map: "trading_pairs_exchange_index")
+  @@index([category], map: "trading_pairs_category_index")
+  @@index([is_active], map: "trading_pairs_is_active_index")
+  @@map("trading_pairs")
+}
+
+model Signal {
+  id              String    @id @default(uuid()) @db.Uuid
+  pair            String
+  direction       String
+  strategy        String
+  timeframe       String
+  entry_price     Float
+  entry_currency  String    @default("USDT")
+  targets         Json // ISignalTargets
+  confidence      Int // 1-10
+  reasoning       String[]
+  indicators      Json? // Analysis indicators used
+  status          String    @default("PENDING")
+  exchange_id     String    @db.Uuid
+  trading_pair_id String?   @db.Uuid
+  strategy_id     String    @db.Uuid
+  created_at      DateTime  @default(now())
+  sent_at         DateTime?
+  executed_at     DateTime?
+  updated_at      DateTime  @updatedAt
+
+  exchange    Exchange     @relation(fields: [exchange_id], references: [id], onDelete: Cascade)
+  tradingPair TradingPair? @relation(fields: [trading_pair_id], references: [id], onDelete: SetNull)
+  strategyRef Strategy     @relation(fields: [strategy_id], references: [id], onDelete: Cascade)
+
+  @@index([pair], map: "signals_pair_index")
+  @@index([status], map: "signals_status_index")
+  @@index([created_at], map: "signals_created_at_index")
+  @@map("signals")
+}
+
+model BotMetrics {
+  id                     String   @id @default(uuid()) @db.Uuid
+  uptime_ms              BigInt
+  signals_generated      Int      @default(0)
+  successful_signals     Int      @default(0)
+  success_rate           Float    @default(0)
+  memory_usage_mb        Float
+  cpu_usage_percent      Float
+  active_pairs_count     Int      @default(0)
+  active_exchanges_count Int      @default(0)
+  error_count            Int      @default(0)
+  exchange_latencies     Json? // Map<ExchangeType, number>
+  signals_per_hour       Float    @default(0)
+  average_confidence     Float    @default(0)
+  recorded_at            DateTime @default(now())
+
+  @@map("bot_metrics")
+}
+
+model BotStatus {
+  id                      String    @id @default(uuid()) @db.Uuid
+  bot_id                  String    @unique
+  version                 String    @default("2.0.0")
+  status                  String    @default("STOPPED") // RUNNING, STOPPED, ERROR, STARTING, STOPPING
+  start_time              DateTime?
+  last_heartbeat          DateTime  @default(now())
+  health_score            Int       @default(100)
+  today_signals_generated Int       @default(0)
+  total_signals_generated Int       @default(0)
+  error_count             Int       @default(0)
+  last_error_time         DateTime?
+  active_exchanges        String[]
+  active_pairs            String[]
+  configuration           Json? // Current bot configuration
+  created_at              DateTime  @default(now())
+  updated_at              DateTime  @updatedAt
+
+  @@map("bot_status")
+}
+
+model SignalPerformance {
+  id                   String    @id @default(uuid()) @db.Uuid
+  signal_id            String    @db.Uuid
+  execution_price      Float?
+  exit_price           Float?
+  profit_loss          Float?
+  profit_loss_percent  Float?
+  execution_time       DateTime?
+  exit_time            DateTime?
+  holding_time_minutes Int?
+  targets_hit          Int[] // Which targets were hit [1, 2] means first two targets
+  stop_loss_hit        Boolean   @default(false)
+  max_drawdown         Float?
+  max_profit           Float?
+  rating               String? // EXCELLENT, GOOD, AVERAGE, POOR
+  notes                String?
+  created_at           DateTime  @default(now())
+  updated_at           DateTime  @updatedAt
+
+  @@unique([signal_id])
+  @@map("signal_performance")
+}
+
+model UserTradingPair {
+  id              String   @id @default(uuid()) @db.Uuid
+  trading_pair_id String   @db.Uuid
+  user_id         BigInt
+  is_active       Boolean  @default(true)
+  created_at      DateTime @default(now())
+
+  trading_pair TradingPair @relation(fields: [trading_pair_id], references: [id], onDelete: Cascade)
+  user         User        @relation(fields: [user_id], references: [telegram_user_id], onDelete: Cascade)
+
+  @@unique([trading_pair_id, user_id])
+  @@map("user_trading_pairs")
+}

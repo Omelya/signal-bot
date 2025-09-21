@@ -26,7 +26,7 @@ export class SignalHandler extends BaseEventHandler<ISignalEventPayload> {
         const { signalId, pair, direction } = event.payload;
 
         try {
-            this.logger.debug(`Handling signal generated event`, {
+            this.logger.info(`Handling signal generated event`, {
                 eventId: event.id,
                 signalId,
                 pair,
@@ -97,10 +97,9 @@ export class SignalHandler extends BaseEventHandler<ISignalEventPayload> {
                 await this.sendSignalNotifications(currentSignal, event);
 
                 currentSignal.markAsSent();
-                await this.signalRepository.save(currentSignal);
 
+                await this.signalRepository.update(currentSignal);
                 await this.logSignalAnalytics(currentSignal, event);
-
                 await this.performAdditionalProcessing(currentSignal);
 
                 break;
@@ -124,7 +123,7 @@ export class SignalHandler extends BaseEventHandler<ISignalEventPayload> {
 
                         if (failedSignal && failedSignal.status === 'PENDING') {
                             failedSignal.markAsFailed();
-                            await this.signalRepository.save(failedSignal);
+                            await this.signalRepository.update(failedSignal);
                         }
                     } catch (saveError) {
                         this.logger.error(`Failed to mark signal as failed: ${saveError}`);
@@ -156,30 +155,21 @@ export class SignalHandler extends BaseEventHandler<ISignalEventPayload> {
     private formatSignalMessage(signal: Signal): string {
         const riskReward = signal.calculateRiskReward();
         const strength = signal.getStrength();
-        const potentialProfit = signal.getPotentialProfit(0);
-        const potentialLoss = signal.getPotentialLoss();
 
-        return `🎯 **${signal.direction} SIGNAL**\n\n` +
-            `📊 **Pair:** ${signal.pair}\n` +
-            `🏢 **Exchange:** ${signal.exchange.toUpperCase()}\n` +
-            `💰 **Entry Price:** ${signal.entry.value} ${signal.entry.currency}\n` +
-            `🎲 **Confidence:** ${signal.confidence}/10 (${strength})\n` +
-            `⚖️ **Risk/Reward:** 1:${riskReward}\n` +
-            `📈 **Strategy:** ${signal.strategy}\n` +
-            `⏰ **Timeframe:** ${signal.timeframe}\n\n` +
-            `🎯 **Take Profit Targets:**\n` +
-            signal.targets.takeProfits.map((tp, i) => {
-                const profit = signal.getPotentialProfit(i);
-                return `   TP${i + 1}: ${tp} (${profit.toFixed(2)}% profit)`;
-            }).join('\n') + '\n' +
-            `🛑 **Stop Loss:** ${signal.targets.stopLoss} (${potentialLoss.toFixed(2)}% loss)\n\n` +
-            `📊 **Profit Potential:** +${potentialProfit.toFixed(2)}%\n` +
-            `📉 **Loss Potential:** -${potentialLoss.toFixed(2)}%\n\n` +
-            `📝 **Technical Analysis:**\n` +
+        return `🎯 <b>${signal.direction} Signal Generated</b>\n\n` +
+            `📊 <b>Pair:</b> ${signal.pair}\n` +
+            `🏢 <b>Exchange:</b> ${signal.exchange.toUpperCase()}\n` +
+            `💰 <b>Entry:</b> ${signal.entry.value} ${signal.entry.currency}\n` +
+            `🎲 <b>Confidence:</b> ${signal.confidence}/10 (${strength})\n` +
+            `⚖️ <b>Risk/Reward:</b> 1:${riskReward}\n` +
+            `📈 <b>Strategy:</b> ${signal.strategy}\n` +
+            `⏰ <b>Timeframe:</b> ${signal.timeframe}\n\n` +
+            `🎯 <b>Take Profits:</b>\n` +
+            signal.targets.takeProfits.map((tp, i) => `   TP${i + 1}: ${tp}`).join('\n') + '\n' +
+            `🛑 <b>Stop Loss:</b> ${signal.targets.stopLoss}\n\n` +
+            `📝 <b>Analysis:</b>\n` +
             signal.reasoning.map(reason => `• ${reason}`).join('\n') + '\n\n' +
-            `⏰ **Generated:** ${signal.createdAt.toLocaleString()}\n` +
-            `🔗 **Signal ID:** \`${signal.id}\`\n\n` +
-            `⚠️ **Risk Warning:** Trading involves risk. Always do your own research and never invest more than you can afford to lose.`;
+            `⚠️ <b>Risk Warning:</b> Trading involves risk. Always do your own research and never invest more than you can afford to lose.`;
     }
 
     private async logSignalAnalytics(signal: Signal, event: IEvent<ISignalEventPayload>): Promise<void> {
@@ -203,11 +193,10 @@ export class SignalHandler extends BaseEventHandler<ISignalEventPayload> {
                 timestamp: signal.createdAt.toISOString(),
                 ageMinutes: signal.getAgeInMinutes(),
                 correlationId: event.correlationId,
-                source: event.source
+                source: event.source,
             };
 
             this.logger.info('Signal analytics logged', { analytics });
-
         } catch (error) {
             this.logger.error('Failed to log signal analytics:', error);
             // Don't throw - analytics failure shouldn't break signal processing
@@ -216,23 +205,19 @@ export class SignalHandler extends BaseEventHandler<ISignalEventPayload> {
 
     private async performAdditionalProcessing(signal: Signal): Promise<void> {
         try {
-            // Run additional processing in parallel where possible
             await Promise.all([
                 this.validateSignalRisk(signal),
                 this.checkMarketConditions(signal),
                 this.analyzePortfolioImpact(signal),
                 this.checkHistoricalPerformance(signal)
             ]);
-
         } catch (error) {
             this.logger.warn('Additional signal processing failed:', error);
-            // Non-critical processing failure - log but don't throw
         }
     }
 
     private async validateSignalRisk(signal: Signal): Promise<void> {
         const riskReward = signal.calculateRiskReward();
-
         if (riskReward < 1.5) {
             this.logger.warn(`Signal ${signal.id} has low risk/reward ratio: ${riskReward}`);
         }

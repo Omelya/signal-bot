@@ -16,6 +16,14 @@ export class DIContainer {
         return this.container;
     }
 
+    public static getInstance(): DIContainer {
+        if (this.container) {
+            return this.container;
+        }
+
+        throw new ServiceNotFoundError('Service DIContainer not found');
+    }
+
     /**
      * Register a service factory
      */

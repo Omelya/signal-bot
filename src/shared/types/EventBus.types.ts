@@ -1,5 +1,6 @@
-// Unified Event Interface
 import {SignalDirection} from "./Signal.types";
+import {MarketData} from "../../domain/entities/MarketData";
+import {TradingPair} from "../../domain/entities/TradingPair";
 
 export interface IEvent<T = any> {
     readonly id: string;
@@ -71,13 +72,9 @@ export interface ISignalEventPayload {
 }
 
 export interface IMarketDataEventPayload {
-    symbol: string;
-    exchange: string;
-    timeframe: string;
+    marketData: MarketData,
+    pair: TradingPair,
     timestamp: number;
-    candleCount: number;
-    price: number;
-    volume: number;
 }
 
 export interface IExchangeEventPayload {

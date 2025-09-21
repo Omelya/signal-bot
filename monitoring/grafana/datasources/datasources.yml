@@ -1,0 +1,6 @@
+datasources:
+  - name: PostgreSQL
+    url: postgres:5432
+    database: ${POSTGRES_DB}
+    user: ${POSTGRES_USER}
+    password: ${POSTGRES_PASSWORD}

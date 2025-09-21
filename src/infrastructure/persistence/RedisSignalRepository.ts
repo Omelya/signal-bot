@@ -11,6 +11,7 @@ import {
     SignalDirection,
     SignalStatus,
 } from '../../shared';
+import { UserSignal } from "domain/repositories/IUserRepository";
 
 export class RedisSignalRepository implements ISignalRepository {
     private redis!: Redis;
@@ -25,7 +26,14 @@ export class RedisSignalRepository implements ISignalRepository {
         this.initializeRedis();
     }
 
-    async save(signal: Signal): Promise<void> {
+    getLastUserSignals(userId: number, number: number): Promise<UserSignal[]> {
+        throw new Error("Method not implemented.");
+    }
+    getCountUserSignalByDate(userId: number, startDate: Date, endDate: Date): Promise<number> {
+        throw new Error("Method not implemented.");
+    }
+
+    async save(signal: Signal): Promise<Signal| null> {
         try {
             await this.ensureConnection();
 
@@ -51,6 +59,8 @@ export class RedisSignalRepository implements ISignalRepository {
                 pair: signal.pair,
                 status: signal.status
             });
+
+            return signal;
         } catch (error: any) {
             this.logger.error(`Failed to save signal ${signal.id} to Redis:`, error);
             throw new DatabaseConnectionError(`Failed to save signal: ${error.message}`, 'redis');
@@ -516,5 +526,9 @@ export class RedisSignalRepository implements ISignalRepository {
 
     findActiveByPair(pair: string): Promise<Signal | null> {
         return Promise.resolve(null);
+    }
+
+    getNumberSignalsByDate(fromDate: Date, endDate: Date): Promise<number> {
+        return Promise.resolve(0);
     }
 }

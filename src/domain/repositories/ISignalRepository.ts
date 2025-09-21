@@ -1,8 +1,9 @@
 import { Signal } from '../entities/Signal';
 import { SignalStatus, SignalDirection, ExchangeType } from '../../shared';
+import {UserSignal} from "./IUserRepository";
 
 export interface ISignalRepository {
-    save(signal: Signal): Promise<void>;
+    save(signal: Signal): Promise<Signal | null>;
     findById(id: string): Promise<Signal | null>;
     findByStatus(status: SignalStatus): Promise<Signal[]>;
     findByPair(pair: string): Promise<Signal[]>;
@@ -34,4 +35,7 @@ export interface ISignalRepository {
         avgConfidence: number;
         successRate: number;
     }>;
+    getLastUserSignals(userId: number, number: number): Promise<UserSignal[]>;
+    getCountUserSignalByDate(userId: number, startDate: Date, endDate: Date): Promise<number>;
+    getNumberSignalsByDate(fromDate: Date, endDate: Date): Promise<number>;
 }

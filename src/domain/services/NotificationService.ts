@@ -8,7 +8,7 @@ import {
     INotification,
     INotificationDeliveryResult,
     ILogger,
-    NotificationError,
+    NotificationError, ISignalMetadata,
 } from '../../shared';
 
 export class NotificationService implements INotificationService {
@@ -23,11 +23,12 @@ export class NotificationService implements INotificationService {
 
     async sendSignalNotification(signal: Signal, message: string): Promise<INotificationResult> {
         try {
-            const notification: INotification = {
+            const notification: INotification<ISignalMetadata> = {
                 id: `signal-${signal.id}-${Date.now()}`,
                 title: `🎯 ${signal.direction} Signal - ${signal.pair}`,
                 message,
                 type: this.getNotificationTypeFromSignal(signal),
+                category: 'signal',
                 priority: this.getPriorityFromSignal(signal),
                 timestamp: new Date(),
                 metadata: {
@@ -36,8 +37,8 @@ export class NotificationService implements INotificationService {
                     direction: signal.direction,
                     confidence: signal.confidence,
                     exchange: signal.exchange,
-                    strategy: signal.strategy
-                }
+                    strategy: signal.strategy,
+                },
             };
 
             this.logger.info(`Sending signal notification for signal ${signal.id}`, {
@@ -76,11 +77,12 @@ export class NotificationService implements INotificationService {
                 enabledChannels: this.getEnabledChannels()
             });
 
-            const notification: INotification = {
+            const notification: INotification<any> = {
                 id: `alert-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
                 title,
                 message,
                 type: this.getNotificationTypeFromPriority(priority),
+                category: 'system',
                 priority,
                 timestamp: new Date(),
                 metadata: {
@@ -126,11 +128,12 @@ export class NotificationService implements INotificationService {
 
             const message = this.formatBotStatusMessage(status);
 
-            const notification: INotification = {
+            const notification: INotification<any> = {
                 id: `bot-status-${Date.now()}`,
                 title,
                 message,
                 type: status.isRunning ? 'success' : 'warning',
+                category: 'system',
                 priority: status.isRunning ? 'normal' : 'high',
                 timestamp: new Date(),
                 metadata: {
@@ -155,7 +158,7 @@ export class NotificationService implements INotificationService {
         }
     }
 
-    async sendCustomNotification(notification: INotification): Promise<INotificationResult> {
+    async sendCustomNotification(notification: INotification<any>): Promise<INotificationResult> {
         try {
             this.logger.debug(`Sending custom notification`, {
                 id: notification.id,
@@ -253,7 +256,7 @@ export class NotificationService implements INotificationService {
     /**
      * Broadcast notification to all enabled channels
      */
-    private async broadcastNotification(notification: INotification): Promise<INotificationResult> {
+    private async broadcastNotification(notification: INotification<any>): Promise<INotificationResult> {
         const enabledChannels = this.getEnabledChannelInstances();
 
         if (enabledChannels.length === 0) {
@@ -312,14 +315,21 @@ export class NotificationService implements INotificationService {
      */
     private async sendToChannel(
         channel: INotificationChannel,
-        notification: INotification,
+        notification: INotification<any>,
         maxRetries: number = 2
     ): Promise<INotificationDeliveryResult> {
         let lastError: Error | undefined;
 
         for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
             try {
-                const result = await channel.send(notification);
+                let result;
+                switch (notification.category) {
+                    case 'signal':
+                        result = await channel.sendSignalNotification(notification);
+                        break;
+                    default:
+                        result = await channel.send(notification);
+                }
 
                 if (result.success) {
                     if (attempt > 1) {
@@ -583,6 +593,7 @@ export class NotificationService implements INotificationService {
             title: `🤖 ${title}`,
             message,
             type: typeMap[type],
+            category: 'system',
             priority: priorityMap[type],
             timestamp: new Date(),
             metadata: {

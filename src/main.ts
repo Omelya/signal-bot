@@ -6,6 +6,7 @@ import { ServiceProvider } from './shared';
 import { DIContainer } from './shared';
 import { WinstonLogger } from './infrastructure/logging/WinstonLogger';
 import { BotOrchestrator } from './application/services/BotOrchestrator';
+import {TelegramBotController} from "./interfaces/telegram/TelegramBotController";
 
 /**
  * Bootstrap function to initialize the application
@@ -42,6 +43,9 @@ async function bootstrap(): Promise<void> {
         // 4. Start CLI
         const cli = container.get<CliController>('cliController');
         await cli.run(process.argv);
+
+        const telegram = container.get<TelegramBotController>('telegramBotController');
+        telegram.run();
     } catch (error) {
         logger.error('💥 Fatal error during bootstrap:', error);
         process.exit(1);
@@ -84,6 +88,11 @@ function setupGracefulShutdown(container: DIContainer, logger: ILogger): void {
                 const botOrchestrator = container.get<BotOrchestrator>('botOrchestrator');
                 if (botOrchestrator && typeof botOrchestrator.stop === 'function') {
                     await botOrchestrator.stop();
+                }
+
+                const telegramBot = container.get<TelegramBotController>('telegramBotController');
+                if (telegramBot && typeof telegramBot.stop === 'function') {
+                    await telegramBot.stop();
                 }
 
                 logger.info('✅ Graceful shutdown completed');

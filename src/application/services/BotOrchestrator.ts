@@ -1,9 +1,19 @@
 import { IMonitorMarketUseCase } from '../usecases/MonitorMarketUseCase';
 import { IManageExchangesUseCase } from '../usecases/ManageExchangesUseCase';
 import { IConfigureBotUseCase } from '../usecases/ConfigureBotUseCase';
-import {IEventBus, IBotEventPayload, IPerformanceEventPayload, EventTypes, IEvent} from '../../shared';
+import {
+    IEventBus,
+    IBotEventPayload,
+    IPerformanceEventPayload,
+    EventTypes,
+    IEvent,
+    DIContainer
+} from '../../shared';
 import { ILogger } from '../../shared';
 import { DomainError } from '../../shared';
+import {MarketDataHandler} from "../handlers/MarketHandler";
+import {ExchangeConnectionHandler} from "../handlers/ExchangeConnectionHandler";
+import {SignalHandler} from "../handlers/SignalHandler";
 
 export interface IBotStatus {
     id: string;
@@ -43,8 +53,6 @@ export class BotOrchestrator implements IBotOrchestrator {
     private botId: string;
     private status: IBotStatus['status'] = 'STOPPED';
     private startTime?: Date | undefined;
-    private totalSignalsGenerated: number = 0;
-    private todaySignalsGenerated: number = 0;
     private errorCount: number = 0;
     private lastErrorTime?: Date | undefined;
     private healthCheckInterval?: NodeJS.Timeout | undefined;
@@ -204,8 +212,8 @@ export class BotOrchestrator implements IBotOrchestrator {
                 .filter(e => e.isConnected)
                 .map(e => e.exchangeType),
             activePairs: monitoringStatus.activePairs,
-            totalSignalsGenerated: this.totalSignalsGenerated,
-            todaySignalsGenerated: this.todaySignalsGenerated,
+            totalSignalsGenerated: monitoringStatus.totalSignals,
+            todaySignalsGenerated: monitoringStatus.signalsGeneratedToday,
             errorCount: this.errorCount,
             lastErrorTime: this.lastErrorTime,
             healthScore,
@@ -296,29 +304,6 @@ export class BotOrchestrator implements IBotOrchestrator {
     }
 
     private setupEventHandlers(): void {
-        const signalGeneratedHandler = {
-            eventType: EventTypes.SIGNAL_GENERATED,
-            handle: async (event: IEvent<any>) => {
-                this.totalSignalsGenerated++;
-                this.todaySignalsGenerated++;
-
-                this.signalMetrics.push({
-                    timestamp: Date.now(),
-                    confidence: event.payload.confidence,
-                    success: true
-                });
-
-                if (this.signalMetrics.length > 1000) {
-                    this.signalMetrics.shift();
-                }
-
-                this.logger.debug('Signal generated, updating metrics', {
-                    totalSignals: this.totalSignalsGenerated,
-                    todaySignals: this.todaySignalsGenerated
-                });
-            }
-        };
-
         const monitoringErrorHandler = {
             eventType: EventTypes.MONITORING_ERROR,
             handle: async (event: IEvent<any>) => {
@@ -332,24 +317,15 @@ export class BotOrchestrator implements IBotOrchestrator {
             }
         };
 
-        const exchangeConnectedHandler = {
-            eventType: EventTypes.EXCHANGE_CONNECTED,
-            handle: async (event: IEvent<any>) => {
-                this.logger.info(`Exchange connected: ${event.payload.exchange}`);
-            }
-        };
-
-        const exchangeDisconnectedHandler = {
-            eventType: EventTypes.EXCHANGE_DISCONNECTED,
-            handle: async (event: IEvent<any>) => {
-                this.logger.warn(`Exchange disconnected: ${event.payload.exchange}`);
-            }
-        };
+        const marketDataHandler = DIContainer.getInstance().get<MarketDataHandler>('marketDataHandler');
+        const exchangeHandler = DIContainer.getInstance().get<ExchangeConnectionHandler>('exchangeConnectionHandler');
+        const signalGeneratedHandler = DIContainer.getInstance().get<SignalHandler>('signalHandler');
 
         this.eventBus.subscribe(EventTypes.SIGNAL_GENERATED, signalGeneratedHandler);
         this.eventBus.subscribe(EventTypes.MONITORING_ERROR, monitoringErrorHandler);
-        this.eventBus.subscribe(EventTypes.EXCHANGE_CONNECTED, exchangeConnectedHandler);
-        this.eventBus.subscribe(EventTypes.EXCHANGE_DISCONNECTED, exchangeDisconnectedHandler);
+        this.eventBus.subscribe(EventTypes.EXCHANGE_CONNECTED, exchangeHandler);
+        this.eventBus.subscribe(EventTypes.EXCHANGE_DISCONNECTED, exchangeHandler);
+        this.eventBus.subscribe(EventTypes.MARKET_DATA_UPDATED, marketDataHandler);
     }
 
     private startHealthCheck(): void {
@@ -417,8 +393,10 @@ export class BotOrchestrator implements IBotOrchestrator {
         try {
             let score = 100;
 
+            const monitoringStatus = await this.monitorMarketUseCase.getMonitoringStatus();
+
             // Deduct for errors
-            const errorRate = this.errorCount / Math.max(this.totalSignalsGenerated, 1);
+            const errorRate = this.errorCount / Math.max(monitoringStatus.totalSignals, 1);
             score -= errorRate * 50;
 
             // Deduct if not running
@@ -449,7 +427,6 @@ export class BotOrchestrator implements IBotOrchestrator {
         const lastResetDate = this.getLastResetDate();
 
         if (lastResetDate !== today) {
-            this.todaySignalsGenerated = 0;
             this.setLastResetDate(today);
             this.logger.info('Daily counters reset');
         }

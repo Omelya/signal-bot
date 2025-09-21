@@ -1,5 +1,15 @@
 import {ExchangeType} from "./Exchange.types";
 import {Price} from "../../domain/valueObjects/Price";
+import {UniqueId} from "../../domain/valueObjects/UniqueId";
+
+export interface ISignalMetadata {
+    signalId: string;
+    pair: string;
+    direction: SignalDirection;
+    confidence: number;
+    exchange: ExchangeType;
+    strategy: string;
+}
 
 export interface ISignalTargets {
     readonly stopLoss: number;
@@ -7,6 +17,7 @@ export interface ISignalTargets {
 }
 
 export interface ISignalCreateParams {
+    id?: UniqueId;
     pair: string;
     direction: SignalDirection;
     entry: Price;

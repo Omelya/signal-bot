@@ -1,11 +1,11 @@
-import {UserId} from "../valueObjects/telegram/UserId";
+import {User} from "../valueObjects/telegram/User";
 
 export class TelegramMessage {
     constructor(
         private readonly id: number,
         private readonly chatId: number,
         private readonly text: string,
-        private readonly userId: UserId,
+        private readonly user: User,
         private readonly timestamp: Date,
     ) {}
 
@@ -15,7 +15,7 @@ export class TelegramMessage {
 
     getText(): string { return this.text; }
 
-    getUserId(): UserId { return this.userId; }
+    getUser(): User { return this.user; }
 
     getTimestamp(): Date { return this.timestamp; }
 

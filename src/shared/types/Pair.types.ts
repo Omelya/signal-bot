@@ -34,6 +34,7 @@ export interface IPairSpecialRules {
 }
 
 export interface ITradingPairCreateParams {
+    id?: string,
     symbol: string;
     baseAsset: string;
     quoteAsset: string;
@@ -41,6 +42,14 @@ export interface ITradingPairCreateParams {
     category: PairCategory;
     settings: IPairSettings;
     strategy: IStrategy;
+}
+
+export interface IUserPairCreateParams {
+    id?: string;
+    is_active?: boolean;
+    trading_pair_id: string;
+    user_id: number;
+    created_at?: Date;
 }
 
 export interface IPairValidationResult {

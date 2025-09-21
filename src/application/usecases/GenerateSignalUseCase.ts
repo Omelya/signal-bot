@@ -1,10 +1,9 @@
 import { ISignalRepository } from '../../domain/repositories/ISignalRepository';
 import { ISignalGenerator } from '../../domain/services/ISignalGenerator';
-import { INotificationService } from '../../domain/services/INotificationService';
 import { Signal } from '../../domain/entities/Signal';
 import { MarketData } from '../../domain/entities/MarketData';
 import { TradingPair } from '../../domain/entities/TradingPair';
-import {IEventBus} from '../../shared';
+import {EventTypes, IEventBus} from '../../shared';
 import { ILogger } from '../../shared';
 import { DomainError } from '../../shared';
 import { ISignalEventPayload } from '../../shared';
@@ -18,7 +17,6 @@ export class GenerateSignalUseCase implements IGenerateSignalUseCase {
     constructor(
         private readonly signalGenerator: ISignalGenerator,
         private readonly signalRepository: ISignalRepository,
-        private readonly notificationService: INotificationService,
         private readonly eventBus: IEventBus,
         private readonly logger: ILogger,
     ) {}
@@ -106,24 +104,21 @@ export class GenerateSignalUseCase implements IGenerateSignalUseCase {
                 return null;
             }
 
-            await this.signalRepository.save(signalItem);
+            const savedSignal = await this.signalRepository.save(signalItem);
 
-            tradingPair.updateLastSignalTime();
+            if (savedSignal) {
+                tradingPair.updateLastSignalTime();
 
-            await this.sendSignalNotification(signalItem);
-            await this.publishSignalEvent(signalItem);
+                await this.publishSignalEvent(savedSignal);
 
-            signalItem.markAsSent();
-
-            await this.signalRepository.save(signalItem);
-
-            this.logger.info(`Signal generated successfully for ${tradingPair.symbol}`, {
-                signalId: signalItem.id,
-                direction: signalItem.direction,
-                confidence: signalItem.confidence,
-                entry: signalItem.entry.value,
-                riskReward: signalItem.calculateRiskReward(),
-            });
+                this.logger.info(`Signal generated successfully for ${tradingPair.symbol}`, {
+                    signalId: savedSignal.id,
+                    direction: savedSignal.direction,
+                    confidence: savedSignal.confidence,
+                    entry: savedSignal.entry.value,
+                    riskReward: savedSignal.calculateRiskReward(),
+                });
+            }
 
             return signalItem;
         } catch (error: any) {
@@ -202,35 +197,6 @@ export class GenerateSignalUseCase implements IGenerateSignalUseCase {
         }
     }
 
-    private async sendSignalNotification(signal: Signal): Promise<void> {
-        try {
-            const message = this.formatSignalNotification(signal);
-            await this.notificationService.sendSignalNotification(signal, message);
-        } catch (error) {
-            this.logger.error(`Failed to send signal notification for ${signal.pair}:`, error);
-        }
-    }
-
-    private formatSignalNotification(signal: Signal): string {
-        const riskReward = signal.calculateRiskReward();
-        const strength = signal.getStrength();
-
-        return `🎯 <b>${signal.direction} Signal Generated</b>\n\n` +
-            `📊 <b>Pair:</b> ${signal.pair}\n` +
-            `🏢 <b>Exchange:</b> ${signal.exchange.toUpperCase()}\n` +
-            `💰 <b>Entry:</b> ${signal.entry.value} ${signal.entry.currency}\n` +
-            `🎲 <b>Confidence:</b> ${signal.confidence}/10 (${strength})\n` +
-            `⚖️ <b>Risk/Reward:</b> 1:${riskReward}\n` +
-            `📈 <b>Strategy:</b> ${signal.strategy}\n` +
-            `⏰ <b>Timeframe:</b> ${signal.timeframe}\n\n` +
-            `🎯 <b>Take Profits:</b>\n` +
-            signal.targets.takeProfits.map((tp, i) => `   TP${i + 1}: ${tp}`).join('\n') + '\n' +
-            `🛑 <b>Stop Loss:</b> ${signal.targets.stopLoss}\n\n` +
-            `📝 <b>Analysis:</b>\n` +
-            signal.reasoning.map(reason => `• ${reason}`).join('\n') + '\n\n' +
-            `🔗 <b>Signal ID:</b> <code>${signal.id}</code>`;
-    }
-
     private async publishSignalEvent(signal: Signal): Promise<void> {
         const payload: ISignalEventPayload = {
             signalId: signal.id,
@@ -244,10 +210,10 @@ export class GenerateSignalUseCase implements IGenerateSignalUseCase {
         };
 
         await this.eventBus.publish({
-            type: 'signal.generated',
+            type: EventTypes.SIGNAL_GENERATED,
             source: 'GenerateSignalUseCase',
             version: '1.0',
-            payload
+            payload,
         });
     }
 }

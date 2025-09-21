@@ -1,11 +1,12 @@
-export interface INotification {
+export interface INotification<T = any> {
     id: string;
     title: string;
     message: string;
     type: 'info' | 'success' | 'warning' | 'error';
+    category: 'signal' | 'system';
     priority: 'low' | 'normal' | 'high' | 'urgent';
     timestamp: Date;
-    metadata?: Record<string, any>;
+    metadata?: T;
 }
 
 export interface INotificationDeliveryResult {
@@ -19,5 +20,6 @@ export interface INotificationChannel {
     name: string;
     isEnabled(): boolean;
     send(notification: INotification): Promise<INotificationDeliveryResult>;
+    sendSignalNotification(notification: INotification): Promise<INotificationDeliveryResult>;
     test(): Promise<boolean>;
 }

@@ -31,7 +31,7 @@ export class Signal {
      */
     static create(params: ISignalCreateParams): Signal {
         return new Signal(
-            UniqueId.generate(),
+            params.id ?? UniqueId.generate(),
             params.pair.toUpperCase(),
             params.direction,
             params.entry,

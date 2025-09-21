@@ -1,15 +1,15 @@
 import { IExchangeRepository } from '../../domain/repositories/IExchangeRepository';
 import { IPairRepository } from '../../domain/repositories/IPairRepository';
-import { IGenerateSignalUseCase } from './GenerateSignalUseCase';
 import { MarketData } from '../../domain/entities/MarketData';
 import { TradingPair } from '../../domain/entities/TradingPair';
 import { Exchange } from '../../domain/entities/Exchange';
-import { IEventBus } from '../../shared';
+import {EventTypes, IEventBus} from '../../shared';
 import { ILogger } from '../../shared';
 import { DomainError } from '../../shared';
 import { IMarketDataEventPayload } from '../../shared';
 import {ExchangeType, TimeFrame} from '../../shared';
 import {IExchangeFactory} from "../../infrastructure/exchanges/factories/ExchangeFactory";
+import {ISignalRepository} from "../../domain/repositories/ISignalRepository";
 
 export interface IMonitorMarketUseCase {
     startMonitoring(): Promise<void>;
@@ -28,6 +28,7 @@ export interface IMonitoringStatus {
     activeExchanges: string[];
     lastUpdateTime: Date;
     signalsGeneratedToday: number;
+    totalSignals: number,
     errorCount: number;
     averageLatency: number;
 }
@@ -37,7 +38,6 @@ export class MonitorMarketUseCase implements IMonitorMarketUseCase {
     private startTime?: Date;
     private monitoringIntervals: Map<string, NodeJS.Timeout> = new Map();
     private totalPairsMonitored: number = 0;
-    private signalsGeneratedToday: number = 0;
     private errorCount: number = 0;
     private latencies: number[] = [];
 
@@ -45,7 +45,7 @@ export class MonitorMarketUseCase implements IMonitorMarketUseCase {
         private readonly exchangeFactory: IExchangeFactory,
         private readonly exchangeRepository: IExchangeRepository,
         private readonly pairRepository: IPairRepository,
-        private readonly generateSignalUseCase: IGenerateSignalUseCase,
+        private readonly signalRepository: ISignalRepository,
         private readonly eventBus: IEventBus,
         private readonly logger: ILogger
     ) {}
@@ -127,7 +127,7 @@ export class MonitorMarketUseCase implements IMonitorMarketUseCase {
             payload: {
                 duration: this.startTime ? Date.now() - this.startTime.getTime() : 0,
                 totalPairsMonitored: this.totalPairsMonitored,
-                signalsGenerated: this.signalsGeneratedToday,
+                signalsGenerated: await this.getTodaySignals(),
                 errorCount: this.errorCount
             }
         });
@@ -188,7 +188,8 @@ export class MonitorMarketUseCase implements IMonitorMarketUseCase {
             activePairs,
             activeExchanges: exchanges.map(e => e.type),
             lastUpdateTime: new Date(),
-            signalsGeneratedToday: this.signalsGeneratedToday,
+            signalsGeneratedToday: await this.getTodaySignals(),
+            totalSignals: await this.signalRepository.count(),
             errorCount: this.errorCount,
             averageLatency: Math.round(averageLatency)
         } as IMonitoringStatus;
@@ -237,7 +238,7 @@ export class MonitorMarketUseCase implements IMonitorMarketUseCase {
             if (pair.shouldAutoDisable()) {
                 this.logger.warn(`Auto-disabling pair ${pair.symbol} due to poor performance`);
                 pair.deactivate();
-                await this.pairRepository.save(pair);
+                await this.pairRepository.update(pair);
 
                 // Stop monitoring this pair
                 const interval = this.monitoringIntervals.get(pair.symbol);
@@ -254,25 +255,9 @@ export class MonitorMarketUseCase implements IMonitorMarketUseCase {
             // Update market data event
             await this.publishMarketDataEvent(marketData, pair);
 
-            // Try to generate signal
-            const signal = await this.generateSignalUseCase.execute(marketData, pair);
-
-            if (signal) {
-                this.signalsGeneratedToday++;
-                pair.markSignalAsSuccessful(); // Assume success for now
-                await this.pairRepository.save(pair);
-
-                this.logger.info(`Signal generated for ${pair.symbol}`, {
-                    signalId: signal.id,
-                    direction: signal.direction,
-                    confidence: signal.confidence
-                });
-            }
-
             // Track latency
             const latency = Date.now() - startTime;
             this.trackLatency(latency);
-
         } catch (error: any) {
             this.errorCount++;
             this.logger.error(`Error monitoring ${pair.symbol}:`, error);
@@ -294,7 +279,7 @@ export class MonitorMarketUseCase implements IMonitorMarketUseCase {
             if (this.errorCount > 10) {
                 this.logger.warn(`Too many errors, temporarily disabling ${pair.symbol}`);
                 pair.deactivate();
-                await this.pairRepository.save(pair);
+                await this.pairRepository.update(pair);
             }
         }
     }
@@ -313,20 +298,16 @@ export class MonitorMarketUseCase implements IMonitorMarketUseCase {
 
     private async publishMarketDataEvent(marketData: MarketData, pair: TradingPair): Promise<void> {
         const payload: IMarketDataEventPayload = {
-            symbol: marketData.symbol,
-            exchange: marketData.exchange,
-            timeframe: marketData.timeframe,
+            marketData,
+            pair,
             timestamp: marketData.timestamp,
-            candleCount: marketData.candleCount,
-            price: marketData.currentPrice,
-            volume: marketData.latestCandle.volume
         };
 
         await this.eventBus.publish({
-            type: 'market.data.updated',
+            type: EventTypes.MARKET_DATA_UPDATED,
             source: 'MonitorMarketUseCase',
             version: '1.0',
-            payload
+            payload,
         });
     }
 
@@ -351,5 +332,17 @@ export class MonitorMarketUseCase implements IMonitorMarketUseCase {
         if (this.latencies.length > 100) {
             this.latencies.shift();
         }
+    }
+
+    private getTodaySignals(): Promise<number> {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        const tomorrow = new Date(today);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+
+        return this
+            .signalRepository
+            .getNumberSignalsByDate(today, tomorrow);
     }
 }

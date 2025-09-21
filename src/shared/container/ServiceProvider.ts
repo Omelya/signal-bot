@@ -78,20 +78,7 @@ export class ServiceProvider {
         });
 
         // Repositories
-        container.register('signalRepository', (c) => {
-            const appConfig = c.get('appConfig') as AppConfig;
-            const logger = c.get('logger');
-
-            if (appConfig.redis.enabled) {
-                const RedisSignalRepository = require('../../infrastructure/persistence/RedisSignalRepository').RedisSignalRepository;
-                return new RedisSignalRepository(appConfig.redis, logger);
-            } else {
-                const InMemorySignalRepository = require('../../infrastructure/persistence/InMemorySignalRepository').InMemorySignalRepository;
-                return new InMemorySignalRepository(logger);
-            }
-        }, { dependencies: ['appConfig', 'logger'] });
-
-        container.register('pairRepository', (c) => {
+        container.register('filePairRepository', (c) => {
             const FilePairRepository = require('../../infrastructure/persistence/FilePairRepository').FilePairRepository;
             const appConfig = c.get('appConfig') as AppConfig;
             const logger = c.get('logger');
@@ -102,6 +89,30 @@ export class ServiceProvider {
             const InMemoryExchangeRepository = require('../../infrastructure/persistence/InMemoryExchangeRepository').InMemoryExchangeRepository;
             const logger = c.get('logger');
             return new InMemoryExchangeRepository(logger);
+        }, { dependencies: ['logger'] });
+
+        container.register('userRepository', (c) => {
+            const userRepository = require('../../infrastructure/persistence/UserRepository').UserRepository;
+            const logger = c.get('logger');
+            return new userRepository(logger);
+        }, { dependencies: ['logger'] });
+
+        container.register('userTradingPairRepository', (c) => {
+            const userTradingPairRepository = require('../../infrastructure/persistence/UserTradingPairRepository').UserTradingPairRepository;
+            const logger = c.get('logger');
+            return new userTradingPairRepository(logger);
+        }, { dependencies: ['logger'] });
+
+        container.register('signalRepository', (c) => {
+            const signalRepository = require('../../infrastructure/persistence/SignalRepository').SignalRepository;
+            const logger = c.get('logger');
+            return new signalRepository(logger);
+        }, { dependencies: ['logger'] });
+
+        container.register('pairRepository', (c) => {
+            const pairRepository = require('../../infrastructure/persistence/PairRepository').PairRepository;
+            const logger = c.get('logger');
+            return new pairRepository(logger);
         }, { dependencies: ['logger'] });
 
         // Technical indicators service
@@ -116,8 +127,9 @@ export class ServiceProvider {
             const TelegramService = require('../../infrastructure/notifications/TelegramService').TelegramService;
             const appConfig = c.get('appConfig') as AppConfig;
             const logger = c.get('logger');
-            return new TelegramService(appConfig.telegram, logger);
-        }, { dependencies: ['appConfig', 'logger'] });
+            const userTradingPairRepository = c.get('userTradingPairRepository')
+            return new TelegramService(userTradingPairRepository, appConfig.telegram, logger);
+        }, { dependencies: ['userTradingPairRepository', 'appConfig', 'logger'] });
 
         container.register('webhookService', (c) => {
             const WebhookService = require('../../infrastructure/notifications/WebhookService').WebhookService;
@@ -183,21 +195,18 @@ export class ServiceProvider {
             const GenerateSignalUseCase = require('../../application/usecases/GenerateSignalUseCase').GenerateSignalUseCase;
             const signalGenerator = c.get('simpleSignalGenerator');
             const signalRepository = c.get('signalRepository');
-            const notificationService = c.get('notificationService');
             const eventBus = c.get('eventBus');
             const logger = c.get('logger');
             return new GenerateSignalUseCase(
                 signalGenerator,
                 signalRepository,
-                notificationService,
                 eventBus,
-                logger
+                logger,
             );
         }, {
             dependencies: [
                 'simpleSignalGenerator',
                 'signalRepository',
-                'notificationService',
                 'eventBus',
                 'logger'
             ]
@@ -208,14 +217,14 @@ export class ServiceProvider {
             const exchangeFactory = c.get('exchangeFactory');
             const exchangeRepository = c.get('exchangeRepository');
             const pairRepository = c.get('pairRepository');
-            const generateSignalUseCase = c.get('generateSignalUseCase');
+            const signalRepository = c.get('signalRepository');
             const eventBus = c.get('eventBus');
             const logger = c.get('logger');
             return new MonitorMarketUseCase(
                 exchangeFactory,
                 exchangeRepository,
                 pairRepository,
-                generateSignalUseCase,
+                signalRepository,
                 eventBus,
                 logger
             );
@@ -223,7 +232,7 @@ export class ServiceProvider {
             dependencies: [
                 'exchangeRepository',
                 'pairRepository',
-                'generateSignalUseCase',
+                'signalRepository',
                 'eventBus',
                 'logger'
             ]
@@ -306,11 +315,18 @@ export class ServiceProvider {
         }, { dependencies: ['notificationService', 'signalRepository', 'logger'] });
 
         container.register('marketDataHandler', (c) => {
-            const MarketDataHandler = require('../../application/handlers/MarketDataHandler').MarketDataHandler;
-            const generateSignalUseCase = c.get('generateSignalUseCase');
+            const MarketDataHandler = require('../../application/handlers/MarketHandler').MarketDataHandler;
             const logger = c.get('logger');
-            return new MarketDataHandler(generateSignalUseCase, logger);
-        }, { dependencies: ['generateSignalUseCase', 'logger'] });
+            const pairRepository = c.get('pairRepository');
+            const generateSignalUseCase = c.get('generateSignalUseCase');
+            return new MarketDataHandler(pairRepository, generateSignalUseCase, logger);
+        }, { dependencies: ['pairRepository', 'generateSignalUseCase', 'logger'] });
+
+        container.register('exchangeConnectionHandler', (c) => {
+            const ExchangeConnectionHandler = require('../../application/handlers/ExchangeConnectionHandler').ExchangeConnectionHandler;
+            const logger = c.get('logger');
+            return new ExchangeConnectionHandler(logger);
+        }, { dependencies: ['logger'] });
     }
 
     /**
@@ -342,6 +358,53 @@ export class ServiceProvider {
             const logger = c.get('logger');
             return new WebSocketController(eventBus, logger);
         }, { dependencies: ['eventBus', 'logger'] });
+
+        container.register('telegramCommandHandler', (c) => {
+            const telegramCommandHandler = require('../../interfaces/telegram/TelegramCommandHandler').TelegramCommandHandler;
+            const userRepository = c.get('userRepository');
+            const userTradingPairRepository = c.get('userTradingPairRepository');
+            const signalRepository = c.get('signalRepository');
+            const logger = c.get('logger');
+
+            return new telegramCommandHandler(
+                userRepository,
+                userTradingPairRepository,
+                signalRepository,
+                logger
+            );
+        }, { dependencies: [] });
+
+        container.register('telegramCallbackHandler', (c) => {
+            const telegramCallbackHandler = require('../../interfaces/telegram/TelegramCallbackHandler').TelegramCallbackHandler;
+            const userRepository = c.get('userRepository');
+            const userTradingPairRepository = c.get('userTradingPairRepository');
+            const signalRepository = c.get('signalRepository');
+            const logger = c.get('logger');
+
+            return new telegramCallbackHandler(
+                userRepository,
+                userTradingPairRepository,
+                signalRepository,
+                logger,
+            );
+        }, { dependencies: [] });
+
+        // Telegram controller (if enabled)
+        container.register('telegramBotController', (c) => {
+            const telegramBotController = require('../../interfaces/telegram/TelegramBotController').TelegramBotController;
+            const telegramCommandHandler = c.get('telegramCommandHandler');
+            const telegramCallbackHandler = c.get('telegramCallbackHandler');
+            const appConfig = c.get('appConfig');
+            const eventBus = c.get('eventBus');
+            const logger = c.get('logger');
+            return new telegramBotController(
+                telegramCommandHandler,
+                telegramCallbackHandler,
+                appConfig,
+                eventBus,
+                logger,
+            );
+        }, { dependencies: ['telegramCommandHandler', 'telegramCallbackHandler', 'eventBus', 'logger'] });
     }
 
     /**
@@ -349,14 +412,6 @@ export class ServiceProvider {
      */
     static configureTestServices(container: DIContainer): void {
         // Override certain services with test implementations
-
-        // Use in-memory repositories for testing
-        container.register('signalRepository', (c) => {
-            const InMemorySignalRepository = require('../../infrastructure/persistence/InMemorySignalRepository').InMemorySignalRepository;
-            const logger = c.get('logger');
-            return new InMemorySignalRepository(logger);
-        }, { dependencies: ['logger'] });
-
         // Configure the rest normally
         this.configureServices(container);
     }
