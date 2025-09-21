@@ -550,8 +550,8 @@ async function main() {
             }
         },
         {
-            symbol: "STBL/USDT",
-            baseAsset: "STBL",
+            symbol: "OP/USDT",
+            baseAsset: "OP",
             quoteAsset: "USDT",
             exchange: "bybit",
             category: "crypto_alt",
@@ -577,8 +577,8 @@ async function main() {
             }
         },
         {
-            symbol: "MATIC/USDT",
-            baseAsset: "MATIC",
+            symbol: "POL/USDT",
+            baseAsset: "POL",
             quoteAsset: "USDT",
             exchange: "binance",
             category: "crypto_alt",
